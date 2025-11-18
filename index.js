@@ -28,12 +28,10 @@ try {
 
 const db = admin.firestore();
 
-// GET de teste
 app.get('/', (req, res) => {
     res.status(200).send('Servidor ativo. Endpoint POST: /webhook');
 });
 
-// POST do webhook
 app.post('/webhook', async (req, res) => {
     const dados = req.body;
 
