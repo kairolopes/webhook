@@ -1,0 +1,56 @@
+// 1. Configuração Básica do Servidor
+const express = require('express');
+const app = express();
+// O Railway define a porta onde o servidor deve rodar (process.env.PORT)
+const PORT = process.env.PORT || 3000; 
+
+// Adiciona um "middleware" para que o servidor consiga ler o JSON enviado pelo Nicochat
+app.use(express.json()); 
+
+// 2. Configuração do Firebase Admin
+const admin = require('firebase-admin');
+
+// O Railway usará a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS (Etapa 3.2)
+// para se autenticar automaticamente no Firebase.
+admin.initializeApp({
+  credential: admin.credential.applicationDefault()
+});
+
+const db = admin.firestore();
+
+// 3. O Endpoint do Seu Webhook (A URL POST)
+// Esta função será ativada quando o Nicochat fizer um POST para /webhook
+app.post('/webhook', async (req, res) => {
+    // Verifica se o método é POST (boa prática)
+    if (req.method !== 'POST') {
+        // Envia um erro se tentarem usar GET ou outro método
+        return res.status(405).send('Método não permitido. Use POST.');
+    }
+
+    // Pega os dados JSON que vieram no corpo da requisição do Nicochat
+    const dadosRecebidos = req.body;
+    
+    // Define o nome da coleção no seu Firestore (você pode mudar se quiser)
+    const colecao = 'dados_do_nicochat'; 
+
+    try {
+        // Salva os dados no Firestore, criando um documento novo
+        await db.collection(colecao).add({
+            ...dadosRecebidos, // Pega todos os dados do Nicochat
+            timestamp: admin.firestore.FieldValue.serverTimestamp() // Adiciona data/hora do servidor
+        });
+        
+        // Envia uma resposta de sucesso (código 200) de volta para o Nicochat
+        res.status(200).send('Dados salvos no Firestore com sucesso!');
+
+    } catch (error) {
+        // Se houver erro, loga e envia um código de erro 500
+        console.error('Erro ao salvar no Firestore:', error);
+        res.status(500).send('Erro interno ao processar o webhook.');
+    }
+});
+
+// 4. Inicia o Servidor e fica ouvindo a porta que o Railway forneceu
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}. Endpoint: /webhook`);
+});
