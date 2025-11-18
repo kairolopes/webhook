@@ -5,37 +5,40 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-const admin = require('firebase-admin');
-
+// 2. Inicialização do Firebase Admin SDK (Método Automático)
 const admin = require('firebase-admin');
 
 try {
-    admin.initializeApp(); // Se a variável ADC estiver correta, ele funciona
-    
-     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-    
-    admin.initializeApp({
-        credential: admin.credential.cert(JSON.parse(serviceAccountJson))
-    });
+    admin.initializeApp(); 
 
-    console.log('Firebase inicializado com sucesso!');
+    console.log('Firebase inicializado com sucesso usando credenciais do ambiente!');
 } catch (e) {
- 
+    console.error('ERRO CRÍTICO ao inicializar Firebase:', e.message);
+    process.exit(1);
 }
 
-const db = admin.firestore();
+
+const db = admin.firestore(); 
+
 
 app.get('/', (req, res) => {
-    res.status(200).send('Servidor ativo. Endpoint POST: /webhook');
+    res.status(200).send('Servidor ativo. Endpoint POST para dados: /webhook');
 });
 
+
 app.post('/webhook', async (req, res) => {
-    const dados = req.body;
+    const dados = req.body; 
+
+    // Validação básica
+    if (!dados || Object.keys(dados).length === 0) {
+        return res.status(400).send('Corpo da requisição vazio ou inválido. Esperando dados JSON.');
+    }
 
     try {
+
         await db.collection('dados_do_nicochat').add({
-            ...dados,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
+            ...dados, 
+            timestamp: admin.firestore.FieldValue.serverTimestamp() // Adiciona um timestamp do servidor
         });
 
         res.status(200).send('Dados salvos no Firestore!');
@@ -44,6 +47,7 @@ app.post('/webhook', async (req, res) => {
         res.status(500).send('Erro ao salvar no Firestore.');
     }
 });
+
 
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
