@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
@@ -10,7 +11,7 @@ try {
     const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
     if (!serviceAccountJson) {
-        throw new Error('Variável GOOGLE_APPLICATION_CREDENTIALS não está definida/vazia. Verifique no Railway.');
+        throw new Error('Variável GOOGLE_APPLICATION_CREDENTIALS não está definida/vazia.');
     }
 
     const serviceAccount = JSON.parse(serviceAccountJson);
@@ -21,36 +22,34 @@ try {
 
     console.log('Firebase inicializado com sucesso!');
 } catch (e) {
-    console.error('ERRO FATAL ao inicializar Firebase:', e.message);
+    console.error('ERRO ao inicializar Firebase:', e.message);
     process.exit(1);
 }
 
 const db = admin.firestore();
 
-// GET para teste
+// GET de teste
 app.get('/', (req, res) => {
-    res.status(200).send('Servidor do Webhook está ativo. Endpoint POST: /webhook');
+    res.status(200).send('Servidor ativo. Endpoint POST: /webhook');
 });
 
-// Endpoint do webhook
+// POST do webhook
 app.post('/webhook', async (req, res) => {
-    const dadosRecebidos = req.body;
-    const colecao = 'dados_do_nicochat';
+    const dados = req.body;
 
     try {
-        await db.collection(colecao).add({
-            ...dadosRecebidos,
+        await db.collection('dados_do_nicochat').add({
+            ...dados,
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        res.status(200).send('Dados salvos no Firestore com sucesso!');
-    } catch (error) {
-        console.error('Erro ao salvar no Firestore:', error);
-        res.status(500).send('Erro interno ao processar o webhook.');
+        res.status(200).send('Dados salvos no Firestore!');
+    } catch (e) {
+        console.error('Erro Firestore:', e);
+        res.status(500).send('Erro ao salvar no Firestore.');
     }
 });
 
-// Iniciar servidor
 app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}. Endpoint: /webhook`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
