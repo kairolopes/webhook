@@ -7,25 +7,20 @@ app.use(express.json());
 
 const admin = require('firebase-admin');
 
+const admin = require('firebase-admin');
+
 try {
-   
-    const serviceAccountJsonString = process.env.FIREBASE_SERVICE_ACCOUNT; 
-
-    if (!serviceAccountJsonString) {
-        throw new Error('Variável FIREBASE_SERVICE_ACCOUNT (JSON das credenciais) não está definida/vazia.');
-    }
-
-
-    const serviceAccount = JSON.parse(serviceAccountJsonString);
-
+    admin.initializeApp(); // Se a variável ADC estiver correta, ele funciona
+    
+     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
+        credential: admin.credential.cert(JSON.parse(serviceAccountJson))
     });
 
     console.log('Firebase inicializado com sucesso!');
 } catch (e) {
-    console.error('ERRO ao inicializar Firebase:', e.message);
-    process.exit(1);
+ 
 }
 
 const db = admin.firestore();
