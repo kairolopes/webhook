@@ -7,24 +7,36 @@ const PORT = process.env.PORT || 3000; 
 // Adiciona um "middleware" para que o servidor consiga ler o JSON enviado pelo Nicochat
 app.use(express.json()); 
 
-// 2. Configuração do Firebase Admin
+
+
+// 2. Configuração do Firebase Admin (Método Explícito)
 const admin = require('firebase-admin');
 
-// Tenta inicializar o Firebase Admin SDK
-try { 
+try {
+    // 1. Acessa o JSON da chave de serviço da variável de ambiente
+    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    
+    if (!serviceAccountJson) {
+        throw new Error('Variável GOOGLE_APPLICATION_CREDENTIALS não está definida.');
+    }
+
+    // 2. Faz o parse do JSON para um objeto JavaScript
+    const serviceAccount = JSON.parse(serviceAccountJson);
+
+    // 3. Inicializa o Firebase explicitamente com o certificado (a forma mais robusta)
     admin.initializeApp({
-        // Tenta usar a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS
-        credential: admin.credential.applicationDefault()
+        credential: admin.credential.cert(serviceAccount)
     });
-    console.log('2. Firebase Admin SDK inicializado com sucesso!'); // Log de sucesso
+    console.log('2. Firebase Admin SDK inicializado com sucesso (Método Explícito)!');
 } catch (e) {
-    // Se falhar (quase certeza por causa da variável GOOGLE_APPLICATION_CREDENTIALS)
-    console.error('2. ERRO FATAL: Falha ao inicializar o Firebase Admin:', e.message); // Log do erro
-    // Encerra o processo, pois o servidor não pode salvar dados sem o Firebase
+    console.error('2. ERRO FATAL: Falha na inicialização explícita do Firebase Admin:', e.message);
     process.exit(1); 
 }
 
 const db = admin.firestore();
+// ... (O restante do seu código permanece igual)
+
+
 
 // --- NOVO CÓDIGO A SER ADICIONADO AQUI ---
 
