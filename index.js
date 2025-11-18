@@ -10,11 +10,19 @@ app.use(express.json()); 
 // 2. Configuração do Firebase Admin
 const admin = require('firebase-admin');
 
-// O Railway usará a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS (Etapa 3.2)
-// para se autenticar automaticamente no Firebase.
-admin.initializeApp({
-  credential: admin.credential.applicationDefault()
-});
+// Tenta inicializar o Firebase Admin SDK
+try { 
+    admin.initializeApp({
+        // Tenta usar a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS
+        credential: admin.credential.applicationDefault()
+    });
+    console.log('2. Firebase Admin SDK inicializado com sucesso!'); // Log de sucesso
+} catch (e) {
+    // Se falhar (quase certeza por causa da variável GOOGLE_APPLICATION_CREDENTIALS)
+    console.error('2. ERRO FATAL: Falha ao inicializar o Firebase Admin:', e.message); // Log do erro
+    // Encerra o processo, pois o servidor não pode salvar dados sem o Firebase
+    process.exit(1); 
+}
 
 const db = admin.firestore();
 
