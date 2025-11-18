@@ -7,29 +7,28 @@ app.use(express.json());
 
 const admin = require('firebase-admin');
 
-// 1. Inicialização EXPLÍCITA do Firebase Admin SDK (CORREÇÃO CRÍTICA PARA RAILWAY)
+// 1. INICIALIZAÇÃO EXPLÍCITA (FINAL FIX para Railway)
 try {
-    // Busca credenciais configuradas nas variáveis de ambiente do Railway
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    // 💡 LENDO A VARIÁVEL PADRÃO DO GOOGLE (Para contornar o erro de formatação)
+    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS; 
     const projectId = process.env.GCLOUD_PROJECT;
     
-    // Verifica se as variáveis críticas estão definidas
+    // Verificação de segurança
     if (!serviceAccountJson || !projectId) {
-        throw new Error('As variáveis de ambiente do Firebase (FIREBASE_SERVICE_ACCOUNT e GCLOUD_PROJECT) não estão configuradas ou estão vazias.');
+        throw new Error('As variáveis GOOGLE_APPLICATION_CREDENTIALS ou GCLOUD_PROJECT não estão definidas.');
     }
 
-    // O JSON.parse é feito aqui, lendo a variável de ambiente
+    // JSON.parse é obrigatório aqui, lendo a string
     const serviceAccount = JSON.parse(serviceAccountJson);
     
-    // Inicializa manualmente, usando as credenciais e o ID do projeto passados
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
+        credential: admin.credential.cert(serviceAccount), 
         projectId: projectId 
     });
     
-    console.log('Firebase inicializado com sucesso e conectado ao projeto ' + projectId);
+    console.log('Firebase inicializado com sucesso no Railway.');
 } catch (e) {
-    // Isso é o que causa o "Crashed" se as variáveis não estiverem 100% corretas no Railway
+    // Isso deve parar de acontecer após a troca do nome da variável
     console.error('ERRO CRÍTICO ao inicializar Firebase:', e.message);
     process.exit(1);
 }
@@ -39,34 +38,32 @@ const db = admin.firestore();
 const auth = admin.auth(); 
 
 // ----------------------------------------------------------------------
-// --- ROTA 1: CADASTRO/LOGIN (Cria conta na aba Authentication) ---
+// --- ROTA 1: CADASTRO/LOGIN (Cria conta e salva dados pessoais) ---
 // ----------------------------------------------------------------------
 app.post('/webhook/cadastro', async (req, res) => {
     const dados = req.body;
 
-    // Validação de dados obrigatórios
     if (!dados.email || !dados.password) {
         return res.status(400).send('Requer "email" e "password" no corpo para cadastrar.');
     }
 
     try {
-        // 1. Cria o usuário no Firebase Authentication (UID é gerado)
+        // 1. Cria o usuário no Firebase Authentication (Aparece na aba Users)
         const userRecord = await auth.createUser({
             email: dados.email,
             password: dados.password, 
             phoneNumber: dados.telefone || null 
         });
 
-        // 2. Salva os dados adicionais (nome, cpf, etc.) no Firestore
+        // 2. Salva os dados adicionais (nome, telefone, cpf, etc.) no Firestore
         await db.collection('usuarios').doc(userRecord.uid).set({
-            ...dados, // Salva todos os campos extras enviados
+            ...dados, 
             uid: userRecord.uid,
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
         
         res.status(200).send(`Usuário criado no Authentication e dados salvos no Firestore! UID: ${userRecord.uid}`);
     } catch (e) {
-        // Trata e-mail já existente
         if (e.code === 'auth/email-already-exists') {
              return res.status(409).send('Erro: Este e-mail já está em uso.');
         }
@@ -74,6 +71,7 @@ app.post('/webhook/cadastro', async (req, res) => {
         res.status(500).send(`Erro interno: ${e.message}`);
     }
 });
+
 
 // ----------------------------------------------------------------------
 // --- ROTA 2: LANÇAMENTOS/DESPESAS (Atrela a transação ao UID do usuário) ---
@@ -90,7 +88,7 @@ app.post('/webhook/lancamento', async (req, res) => {
         let userAuth;
         const identifier = dados.identificador_usuario;
 
-        // 1. Encontra o usuário no Firebase Auth (seja por e-mail ou telefone)
+        // 1. Encontra o usuário no Firebase Auth
         if (identifier.includes('@')) {
             userAuth = await auth.getUserByEmail(identifier);
         } else {
@@ -99,23 +97,23 @@ app.post('/webhook/lancamento', async (req, res) => {
 
         const userUID = userAuth.uid; 
         
-        // 2. Remove o identificador do JSON antes de salvar, isolando só os dados da transação
+        // 2. Remove o identificador do JSON antes de salvar
         const { identificador_usuario, ...lancamento } = dados; 
 
-        // 3. Salva a transação como uma SUBCOLEÇÃO 'transacoes'
+        // 3. Salva a transação como uma SUBCOLEÇÃO 'transacoes' (Ligação forte)
         await db
             .collection('usuarios')
-            .doc(userUID) // Acessa o usuário específico pelo UID
+            .doc(userUID) 
             .collection('transacoes') 
             .add({
                 ...lancamento,
-                uid: userUID, // Redundância útil para indexação
+                uid: userUID, 
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
         res.status(200).send(`Lançamento salvo com sucesso para o usuário ${userAuth.email}.`);
     } catch (e) {
-        // Erro 404 se o usuário não for encontrado (e.code 'auth/user-not-found')
+        // Erro 404 se o usuário não for encontrado
         console.error('Erro ao processar lançamento:', e.message);
         res.status(404).send('Erro: O usuário não foi encontrado ou falha de autenticação.');
     }
@@ -124,7 +122,7 @@ app.post('/webhook/lancamento', async (req, res) => {
 
 // --- ROTA BASE E LISTEN ---
 app.get('/', (req, res) => {
-    res.status(200).send('Servidor ativo. Endpoints: /webhook/cadastro e /webhook/lancamento');
+    res.status(200).send('Servidor ativo no Railway. Endpoints: /webhook/cadastro e /webhook/lancamento');
 });
 
 app.listen(PORT, () => {
