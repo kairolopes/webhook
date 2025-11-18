@@ -8,13 +8,15 @@ app.use(express.json());
 const admin = require('firebase-admin');
 
 try {
-    const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+   
+    const serviceAccountJsonString = process.env.FIREBASE_SERVICE_ACCOUNT; 
 
-    if (!serviceAccountJson) {
-        throw new Error('Variável GOOGLE_APPLICATION_CREDENTIALS não está definida/vazia.');
+    if (!serviceAccountJsonString) {
+        throw new Error('Variável FIREBASE_SERVICE_ACCOUNT (JSON das credenciais) não está definida/vazia.');
     }
 
-    const serviceAccount = JSON.parse(serviceAccountJson);
+
+    const serviceAccount = JSON.parse(serviceAccountJsonString);
 
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
