@@ -21,29 +21,46 @@ try {
     
     const tempFilePath = path.join(os.tmpdir(), 'serviceAccountKey.json');
     fs.writeFileSync(tempFilePath, serviceAccountJson);
-    
+
     const serviceAccount = require(tempFilePath);
 
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: projectId
     });
-    
+
     console.log('Firebase inicializado com sucesso usando arquivo temporário!');
 } catch (e) {
     console.error('ERRO CRÍTICO ao inicializar Firebase:', e.message);
     process.exit(1);
 }
 
+// FIRESTORE
 const db = admin.firestore();
 const auth = admin.auth();
 
-// TEST ROUTE
+// ROTA GET (TESTE)
 app.get("/", (req, res) => {
     res.send("Webhook ativo no Railway!");
 });
 
-// Start server
+// ROTA POST /webhook (OBRIGATÓRIA)
+app.post("/webhook", async (req, res) => {
+    console.log("🔔 Webhook recebido!");
+    console.log(req.body);
+
+    try {
+        return res.status(200).json({
+            status: "success",
+            received: req.body
+        });
+    } catch (err) {
+        console.error("Erro:", err);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// INICIAR SERVIDOR
 app.listen(PORT, () => {
     console.log(`🔥 Servidor rodando na porta ${PORT}`);
 });
