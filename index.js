@@ -51,31 +51,17 @@ const auth = admin.auth();
  * @param {string} telefone
  * @returns {string} userId
  */
-async function getUserId(email, telefone) {
-    // 1. Busca APENAS pelo E-mail
+
+async function getUserId(email) { 
     const snapshot = await db.collection("users")
         .where("email", "==", email)
-        .get();
+        .get(); // <--- BUSCA APENAS PELO EMAIL
 
     if (snapshot.empty) {
         throw new Error("Usuário não encontrado.");
     }
     
-    const userDoc = snapshot.docs[0];
-    const userData = userDoc.data();
-    const userId = userDoc.id;
-
-    // 2. Verifica o Telefone (Garante que o telefone corresponde, mas ignora formatação como '+')
-    // Normaliza os valores removendo espaços e caracteres não-numéricos
-    const cleanSentPhone = telefone.replace(/\D/g, ''); // Telefone enviado (JSON)
-    const cleanStoredPhone = userData.telefone.replace(/\D/g, ''); // Telefone no Firestore
-
-    if (cleanSentPhone !== cleanStoredPhone) {
-        // Se o telefone não for idêntico após limpeza, ainda é um erro de credencial
-        throw new Error("Telefone incorreto.");
-    }
-
-    return userId;
+    return snapshot.docs[0].id;
 }
 
 // -------------------------------------------------------------
