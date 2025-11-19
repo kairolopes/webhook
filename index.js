@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore + Autenticação (Versão 2.2 - FINAL)
+// 🚀 Servidor Webhook + Firebase Firestore + Autenticação — Versão Oficial 3.0
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -14,15 +14,14 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
-// 1. 🔥 INICIALIZAÇÃO DO FIREBASE (MODELO CORRETO PARA RAILWAY)
+// 🔥 1. INICIALIZAÇÃO (Railway + Firebase) — LIMPA, ROBUSTA, SEGURA
 // -------------------------------------------------------------
-
 try {
     const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     const projectId = process.env.GCLOUD_PROJECT;
 
-    if (!jsonString) throw new Error("Variável GOOGLE_APPLICATION_CREDENTIALS vazia.");
-    if (!projectId) throw new Error("Variável GCLOUD_PROJECT vazia.");
+    if (!jsonString) throw new Error("GOOGLE_APPLICATION_CREDENTIALS não definida.");
+    if (!projectId) throw new Error("GCLOUD_PROJECT não definida.");
 
     const tempPath = path.join(os.tmpdir(), "firebase_key.json");
     fs.writeFileSync(tempPath, jsonString);
@@ -32,9 +31,9 @@ try {
         projectId,
     });
 
-    console.log("🔥 Firebase inicializado com sucesso!");
+    console.log("🔥 Firebase inicializado.");
 } catch (err) {
-    console.error("❌ Erro ao inicializar Firebase:", err);
+    console.error("❌ Erro ao iniciar Firebase:", err.message);
     process.exit(1);
 }
 
@@ -42,108 +41,88 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// FUNÇÕES AUXILIARES PARA MANTER A CONSISTÊNCIA DE DADOS
+// 🔧 2. FUNÇÃO PARA BUSCAR UID PELO EMAIL (VERSÃO MAIS SEGURA)
 // -------------------------------------------------------------
+async function findUserIdByEmail(email) {
+    const cleanEmail = email.trim().toLowerCase();
 
-/**
- * Busca o UID do usuário APENAS pelo e-mail (robusto contra falhas de telefone).
- * @param {string} email
- * @returns {string} userId
- */
-async function getUserId(email) { 
-    // O email JÁ DEVE TER O .trim() APLICADO NA ROTA DE CHAMADA!
-    const snapshot = await db.collection("users")
-        .where("email", "==", email)
-        .get(); 
+    const snapshot = await db
+        .collection("users")
+        .where("email", "==", cleanEmail)
+        .get();
 
     if (snapshot.empty) {
-        // Se a busca por e-mail falhar, o usuário não existe.
         throw new Error("Usuário não encontrado.");
     }
-    
+
     return snapshot.docs[0].id;
 }
 
 // -------------------------------------------------------------
-// 2. 🌐 ROTA DE TESTE & 3. 🤖 ROTA WEBHOOK GERAL
+// 🧪 3. ROTA DE TESTE
 // -------------------------------------------------------------
-
 app.get("/", (req, res) => {
-    res.send("Webhook ativo no Railway!");
-});
-
-app.post("/webhook", (req, res) => {
-    return res.json({
-        status: "success",
-        received: req.body
-    });
+    res.json({ status: "online", message: "Servidor rodando no Railway." });
 });
 
 // -------------------------------------------------------------
-// 4. 🧑‍💼 CADASTRO DE USUÁRIO
+// 🧑‍💼 4. CADASTRO DE USUÁRIO
 // -------------------------------------------------------------
 app.post("/cadastro", async (req, res) => {
     try {
         const { email, password, nome, telefone, cpf } = req.body;
 
-        if (!email || !password || !telefone) {
+        if (!email || !password || !telefone || !nome) {
             return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
-        
-        // CORREÇÃO: Limpa o email e telefone antes de salvar
-        const cleanEmail = email.trim();
-        const cleanTelefone = telefone.trim();
 
-        // 1. VERIFICAÇÃO MÍNIMA
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanPhone = telefone.trim();
+
         if (password.length < 6) {
-            return res.status(400).json({ error: "A senha deve ter no mínimo 6 caracteres." });
+            return res.status(400).json({ error: "A senha deve ter 6+ caracteres." });
         }
 
-        // 2. CRIAÇÃO NO AUTH COM TRATAMENTO DE ERRO
         let userRecord;
         try {
-            // Usa o e-mail limpo para o Firebase Auth
-            userRecord = await auth.createUser({ email: cleanEmail, password }); 
-        } catch (authError) {
-            if (authError.code === 'auth/email-already-in-use') {
-                 return res.status(409).json({ error: "O email já está cadastrado no Firebase Auth." });
+            userRecord = await auth.createUser({
+                email: cleanEmail,
+                password: password
+            });
+        } catch (e) {
+            if (e.code === "auth/email-already-in-use") {
+                return res.status(409).json({ error: "Email já cadastrado." });
             }
-            throw authError;
+            throw e;
         }
 
-        // 3. SALVAR NO FIRESTORE
         await db.collection("users").doc(userRecord.uid).set({
-            email: cleanEmail, // Salva limpo
-            nome, 
-            telefone: cleanTelefone, // Salva limpo
-            cpf, 
-            criadoEm: new Date()
+            email: cleanEmail,
+            nome,
+            telefone: cleanPhone,
+            cpf,
+            criadoEm: new Date(),
         });
 
-        return res.json({
+        res.json({
             status: "sucesso",
-            mensagem: "Usuário cadastrado e autenticado!",
-            uid: userRecord.uid
+            uid: userRecord.uid,
+            mensagem: "Usuário criado."
         });
 
-    } catch (error) {
-        return res.status(500).json({
-            error: "Erro ao cadastrar.",
-            details: error.message
-        });
+    } catch (err) {
+        res.status(500).json({ error: "Erro ao cadastrar.", details: err.message });
     }
 });
 
-
 // -------------------------------------------------------------
-// 5. 💸 LANÇAMENTO FINANCEIRO (INSERÇÃO - COM BUSCA REAL DE CONTA E PARCELAMENTO)
+// 💸 5. CRIAR LANÇAMENTO
 // -------------------------------------------------------------
-
 app.post("/lancamento", async (req, res) => {
     try {
         const {
             email,
-            telefone, // Mantido apenas para a validação 400
+            telefone,
             tipo,
             contaId,
             categoriaId,
@@ -154,221 +133,186 @@ app.post("/lancamento", async (req, res) => {
             installments = 1
         } = req.body;
 
-        // Validação de campos obrigatórios
         if (!email || !telefone || !tipo || !valor || !contaId || !categoriaId || !data) {
-            return res.status(400).json({ error: "Campos obrigatórios faltando: email, telefone, tipo, valor, contaId, categoriaId, data." });
+            return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
 
-        // CORREÇÃO FINAL: Limpa o email antes da busca
-        const cleanEmail = email.trim();
+        const userId = await findUserIdByEmail(email);
 
-        // 1. BUSCA O UID (Apenas com o email limpo)
-        const userId = await getUserId(cleanEmail); 
+        const account = await db
+            .collection("users")
+            .doc(userId)
+            .collection("accounts")
+            .doc(contaId)
+            .get();
 
-        // 2. BUSCA REAL DOS DETALHES DA CONTA NO FIRESTORE
-        const accountDoc = await db.collection("users").doc(userId)
-                                   .collection("accounts").doc(contaId).get();
-
-        if (!accountDoc.exists) {
-             return res.status(404).json({ error: "Erro no lançamento.", details: "Conta/Cartão não encontrado para este usuário." });
+        if (!account.exists) {
+            return res.status(404).json({
+                error: "Conta não encontrada.",
+            });
         }
-        
-        const accountData = accountDoc.data();
 
-        const isCreditCard = accountData.type === 'credito' && tipo === 'expense';
-        const numInstallments = parseInt(installments);
-        
-        let transacoesParaAdicionar = [];
-        const baseData = {
+        const accountData = account.data();
+        const isCreditCard = accountData.type === "credito" && tipo === "expense";
+        const n = parseInt(installments);
+
+        const base = {
             tipo,
             contaId,
             categoriaId,
             subcategoria: subcategoria || "",
             descricao,
             valor: Number(valor),
-            data: data, // string YYYY-MM-DD
+            data,
             criadoEm: new Date(),
-            installments: numInstallments,
+            installments: n
         };
 
-        // Lógica de Parcelamento (replicada do Frontend)
-        if (isCreditCard && numInstallments > 1) {
-            const amountPerInstallment = baseData.valor / numInstallments;
+        let lancamentos = [];
+
+        if (isCreditCard && n > 1) {
             const purchaseDate = new Date(data);
-            
-            // Converte os dias de vencimento/fechamento para números
-            const dueDay = accountData.dueDay ? parseInt(accountData.dueDay) : 10;
-            const closingDay = accountData.closingDay ? parseInt(accountData.closingDay) : 25;
+            const due = parseInt(accountData.dueDay || 10);
+            const close = parseInt(accountData.closingDay || 25);
+            const eachValue = base.valor / n;
 
-            for (let i = 0; i < numInstallments; i++) {
-                
-                let finalMonth = purchaseDate.getMonth();
-                let finalYear = purchaseDate.getFullYear();
+            for (let i = 0; i < n; i++) {
+                let month = purchaseDate.getMonth();
+                let year = purchaseDate.getFullYear();
 
-                // Lógica de avanço de mês (Ajuste para a primeira parcela)
-                if (i === 0 && purchaseDate.getDate() > closingDay) {
-                    finalMonth += 1; 
-                }
-                
-                // Avança o mês e corrige o ano
-                finalMonth += i; 
-
-                if (finalMonth > 11) {
-                    finalYear += Math.floor(finalMonth / 12);
-                    finalMonth = finalMonth % 12;
+                if (i === 0 && purchaseDate.getDate() > close) {
+                    month++;
                 }
 
-                // Cria a data de vencimento
-                const finalDate = new Date(finalYear, finalMonth, dueDay);
+                month += i;
 
-                transacoesParaAdicionar.push({
-                    ...baseData,
-                    amount: amountPerInstallment,
-                    descricao: `${baseData.descricao} (${i + 1}/${numInstallments})`,
-                    data: finalDate.toISOString().substring(0, 10),
-                    isInstallment: true,
+                if (month > 11) {
+                    year += Math.floor(month / 12);
+                    month %= 12;
+                }
+
+                const finalDate = new Date(year, month, due);
+
+                lancamentos.push({
+                    ...base,
+                    amount: eachValue,
+                    descricao: `${descricao} (${i+1}/${n})`,
+                    data: finalDate.toISOString().split("T")[0],
+                    isInstallment: true
                 });
             }
+
         } else {
-            transacoesParaAdicionar.push(baseData);
+            lancamentos.push(base);
         }
 
-        // Registrar todas as transações (Batch)
         const batch = db.batch();
-        const transactionsColRef = db.collection("users").doc(userId).collection("transactions");
-        
-        transacoesParaAdicionar.forEach(t => {
-            batch.set(transactionsColRef.doc(), t);
-        });
+        const ref = db.collection("users").doc(userId).collection("transactions");
 
+        lancamentos.forEach(l => batch.set(ref.doc(), l));
         await batch.commit();
 
-        return res.json({
+        res.json({
             status: "sucesso",
-            mensagem: `${transacoesParaAdicionar.length} Lançamento(s) registrado(s).`,
+            mensagem: `${lancamentos.length} lançamento(s) registrado(s).`,
             userId
         });
 
-    } catch (error) {
-        return res.status(500).json({
+    } catch (err) {
+        res.status(500).json({
             error: "Erro no lançamento.",
-            details: error.message
+            details: err.message
         });
     }
 });
 
 // -------------------------------------------------------------
-// 6. 🔄 ALTERAÇÃO (UPDATE) DE LANÇAMENTO
+// ✏️ 6. ALTERAR LANÇAMENTO
 // -------------------------------------------------------------
-
-app.put("/lancamento/:transactionId", async (req, res) => {
+app.put("/lancamento/:id", async (req, res) => {
     try {
-        const { transactionId } = req.params;
-        const { email, telefone, ...updatedFields } = req.body;
-
-        if (!email || !telefone || Object.keys(updatedFields).length === 0) {
-            return res.status(400).json({ error: "Email, telefone e dados de atualização são obrigatórios." });
-        }
-
-        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
-
-        const transactionRef = db.collection("users")
-            .doc(userId)
-            .collection("transactions")
-            .doc(transactionId);
-
-        await transactionRef.set(updatedFields, { merge: true });
-
-        return res.json({
-            status: "sucesso",
-            mensagem: `Lançamento ${transactionId} atualizado.`,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            error: "Erro ao atualizar lançamento.",
-            details: error.message
-        });
-    }
-});
-
-
-// -------------------------------------------------------------
-// 7. 🗑️ EXCLUSÃO (DELETE) DE LANÇAMENTO
-// -------------------------------------------------------------
-
-app.delete("/lancamento/:transactionId", async (req, res) => {
-    try {
-        const { transactionId } = req.params;
-        const { email, telefone } = req.body; // Usa BODY para segurança
+        const { id } = req.params;
+        const { email, telefone, ...fields } = req.body;
 
         if (!email || !telefone) {
-            return res.status(400).json({ error: "Email e telefone são obrigatórios para autenticação." });
+            return res.status(400).json({ error: "Email + telefone obrigatórios." });
         }
 
-        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
+        if (Object.keys(fields).length === 0) {
+            return res.status(400).json({ error: "Nenhum campo enviado para atualizar." });
+        }
 
-        const transactionRef = db.collection("users")
+        const userId = await findUserIdByEmail(email);
+
+        await db
+            .collection("users")
             .doc(userId)
             .collection("transactions")
-            .doc(transactionId);
+            .doc(id)
+            .set(fields, { merge: true });
 
-        await transactionRef.delete();
+        res.json({ status: "sucesso", mensagem: "Lançamento atualizado." });
 
-        return res.json({
-            status: "sucesso",
-            mensagem: `Lançamento ${transactionId} excluído.`,
-        });
-    } catch (error) {
-        // Trata a exceção de Usuário não encontrado, que é a mais comum
-        if (error.message.includes("Usuário não encontrado")) {
-             return res.status(401).json({ error: error.message });
-        }
-        return res.status(500).json({
-            error: "Erro ao excluir lançamento.",
-            details: error.message
-        });
+    } catch (err) {
+        res.status(500).json({ error: "Erro ao atualizar.", details: err.message });
     }
 });
 
 // -------------------------------------------------------------
-// 8. 📊 RELATÓRIO FINANCEIRO (CONSULTA)
+// 🗑️ 7. EXCLUIR LANÇAMENTO
 // -------------------------------------------------------------
-
-app.post("/relatorio", async (req, res) => {
+app.delete("/lancamento/:id", async (req, res) => {
     try {
         const { email, telefone } = req.body;
+        const { id } = req.params;
 
-        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
+        if (!email || !telefone) {
+            return res.status(400).json({ error: "Email + telefone obrigatórios." });
+        }
 
-        const lancamentos = await db.collection("users")
+        const userId = await findUserIdByEmail(email);
+
+        await db
+            .collection("users")
+            .doc(userId)
+            .collection("transactions")
+            .doc(id)
+            .delete();
+
+        res.json({ status: "sucesso", mensagem: "Lançamento excluído." });
+
+    } catch (err) {
+        res.status(500).json({ error: "Erro ao excluir.", details: err.message });
+    }
+});
+
+// -------------------------------------------------------------
+// 📊 8. RELATÓRIO
+// -------------------------------------------------------------
+app.post("/relatorio", async (req, res) => {
+    try {
+        const { email } = req.body;
+        const userId = await findUserIdByEmail(email);
+
+        const snapshot = await db
+            .collection("users")
             .doc(userId)
             .collection("transactions")
             .orderBy("data", "desc")
             .get();
 
-        const lista = lancamentos.docs.map(doc => ({ 
-             id: doc.id, 
-             ...doc.data() 
-        }));
+        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        return res.json({
-            status: "sucesso",
-            total: lista.length,
-            lancamentos: lista
-        });
+        res.json({ status: "sucesso", total: list.length, lancamentos: list });
 
-    } catch (error) {
-        res.status(500).json({
-            error: "Erro ao gerar relatório.",
-            details: error.message
-        });
+    } catch (err) {
+        res.status(500).json({ error: "Erro no relatório.", details: err.message });
     }
 });
 
 // -------------------------------------------------------------
-// 9. 🚀 INICIAR SERVIDOR
+// 🚀 9. INICIAR SERVIDOR
 // -------------------------------------------------------------
-
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
