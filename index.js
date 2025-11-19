@@ -150,7 +150,7 @@ app.post("/lancamento", async (req, res) => {
             return res.status(400).json({ error: "Campos obrigatórios faltando: email, telefone, tipo, valor, contaId, categoriaId, data." });
         }
 
-        const userId = await getUserId(email, telefone);
+        const userId = await getUserId(email);
         
         // NOVO: BUSCA REAL DOS DETALHES DA CONTA NO FIRESTORE
         const accountDoc = await db.collection("users").doc(userId)
@@ -265,7 +265,7 @@ app.put("/lancamento/:transactionId", async (req, res) => {
             return res.status(400).json({ error: "Email, telefone e dados de atualização são obrigatórios." });
         }
 
-        const userId = await getUserId(email, telefone);
+        const userId = await getUserId(email);
 
         const transactionRef = db.collection("users")
             .doc(userId)
@@ -306,7 +306,7 @@ app.delete("/lancamento/:transactionId", async (req, res) => {
             return res.status(400).json({ error: "Email e telefone são obrigatórios para autenticação." });
         }
 
-        const userId = await getUserId(email, telefone);
+        const userId = await getUserId(email);
 
         const transactionRef = db.collection("users")
             .doc(userId)
@@ -339,7 +339,7 @@ app.post("/relatorio", async (req, res) => {
     try {
         const { email, telefone } = req.body;
 
-        const userId = await getUserId(email, telefone);
+        const userId = await getUserId(email);
 
         const lancamentos = await db.collection("users")
             .doc(userId)
