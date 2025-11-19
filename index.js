@@ -77,16 +77,6 @@ async function getUserId(email, telefone) {
 
     return userId;
 }
-async function getAccountDetails(userId, accountId) {
-    // Para simplificar, assumimos que 'contaId' contém o tipo (ex: 'credito-nubank')
-    // Na prática, buscaríamos na subcoleção 'accounts' do usuário.
-    if (accountId && accountId.includes("credito")) {
-        // Valores padrão para lógica de cartão (dia 10 vence, dia 25 fecha)
-        return { type: 'credito', dueDay: 10, closingDay: 25 };
-    }
-    return { type: 'conta', dueDay: 0, closingDay: 0 };
-}
-
 
 // -------------------------------------------------------------
 // 2. 🌐 ROTA DE TESTE & 3. 🤖 ROTA WEBHOOK GERAL
@@ -150,8 +140,9 @@ app.post("/cadastro", async (req, res) => {
 });
 
 
+
 // -------------------------------------------------------------
-// 5. 💸 LANÇAMENTO FINANCEIRO (INSERÇÃO - COM LÓGICA DE PARCELAMENTO)
+// 5. 💸 LANÇAMENTO FINANCEIRO (INSERÇÃO - COM BUSCA REAL DE CONTA)
 // -------------------------------------------------------------
 
 app.post("/lancamento", async (req, res) => {
@@ -160,13 +151,13 @@ app.post("/lancamento", async (req, res) => {
             email,
             telefone,
             tipo,
-            contaId,       // Novo campo obrigatório
-            categoriaId,   // Novo campo
-            subcategoria,  // Novo campo
+            contaId,       
+            categoriaId,   
+            subcategoria,  
             descricao,
             valor,
             data,
-            installments = 1 // Novo campo para parcelas
+            installments = 1
         } = req.body;
 
         if (!email || !telefone || !tipo || !valor || !contaId || !categoriaId || !data) {
@@ -174,10 +165,24 @@ app.post("/lancamento", async (req, res) => {
         }
 
         const userId = await getUserId(email, telefone);
-        const account = await getAccountDetails(userId, contaId);
-        const isCreditCard = account.type === 'credito' && tipo === 'expense';
+        
+        // NOVO: BUSCA REAL DOS DETALHES DA CONTA NO FIRESTORE
+        const accountDoc = await db.collection("users").doc(userId)
+                                   .collection("accounts").doc(contaId).get();
+
+        if (!accountDoc.exists) {
+             return res.status(404).json({ error: "Erro no lançamento.", details: "Conta/Cartão não encontrado para este usuário." });
+        }
+        
+        const accountData = accountDoc.data();
+
+        const isCreditCard = accountData.type === 'credito' && tipo === 'expense';
         const numInstallments = parseInt(installments);
         
+        // ---------------------------------------------------------------------------------------------------
+        // O restante do código de parcelamento pode permanecer o mesmo, mas usando accountData.dueDay/closingDay
+        // ---------------------------------------------------------------------------------------------------
+
         let transacoesParaAdicionar = [];
         const baseData = {
             tipo,
@@ -197,15 +202,16 @@ app.post("/lancamento", async (req, res) => {
             const purchaseDate = new Date(data);
 
             for (let i = 0; i < numInstallments; i++) {
-                let finalDate = new Date(data); // Inicia com a data da compra
-                finalDate.setDate(account.dueDay); // Define o dia de vencimento
+                // ... (cálculos de data usando accountData.dueDay e accountData.closingDay) ...
+                
+                let finalDate = new Date(data); 
+                finalDate.setDate(accountData.dueDay); 
 
-                let finalMonth = purchaseDate.getMonth() + i;
+                let finalMonth = purchaseDate.getMonth();
                 let finalYear = purchaseDate.getFullYear();
 
-                // Lógica de avanço de mês: 
-                // A primeira parcela pode pular um mês se a compra foi depois do fechamento.
-                if (i === 0 && purchaseDate.getDate() > account.closingDay) {
+                // Lógica de avanço de mês (Ajuste para a primeira parcela)
+                if (i === 0 && purchaseDate.getDate() > accountData.closingDay) {
                     finalMonth += 1; 
                 }
                 
@@ -217,7 +223,7 @@ app.post("/lancamento", async (req, res) => {
                     finalMonth = finalMonth % 12;
                 }
 
-                finalDate.setFullYear(finalYear, finalMonth, account.dueDay);
+                finalDate.setFullYear(finalYear, finalMonth, accountData.dueDay);
 
                 transacoesParaAdicionar.push({
                     ...baseData,
@@ -228,11 +234,10 @@ app.post("/lancamento", async (req, res) => {
                 });
             }
         } else {
-            // Lançamento único (ou despesa em dinheiro/conta)
             transacoesParaAdicionar.push(baseData);
         }
 
-        // Registrar todas as transações
+        // Registrar todas as transações (Batch)
         const batch = db.batch();
         const transactionsColRef = db.collection("users").doc(userId).collection("transactions");
         
@@ -255,8 +260,6 @@ app.post("/lancamento", async (req, res) => {
         });
     }
 });
-
-// --- NOVAS ROTAS PARA PERMITIR ALTERAÇÃO E EXCLUSÃO (CRUD COMPLETO) ---
 
 // -------------------------------------------------------------
 // 6. 🔄 ALTERAÇÃO (UPDATE) DE LANÇAMENTO
