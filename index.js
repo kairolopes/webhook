@@ -79,7 +79,7 @@ app.post("/cadastro", async (req, res) => {
         });
 
         // 2 — Salvar no Firestore
-        await db.collection("usuarios").doc(userRecord.uid).set({
+        await db.collection("users").doc(userRecord.uid).set({
             email,
             nome,
             telefone,
@@ -114,7 +114,7 @@ app.post("/lancamento", async (req, res) => {
         }
 
         // 1 — Buscar usuário
-        const snapshot = await db.collection("usuarios")
+        const snapshot = await db.collection("users")
             .where("email", "==", email)
             .where("telefone", "==", telefone)
             .get();
@@ -128,7 +128,7 @@ app.post("/lancamento", async (req, res) => {
         const userId = snapshot.docs[0].id;
 
         // 2 — Registrar lançamento
-        await db.collection("usuarios")
+        await db.collection("users")
             .doc(userId)
             .collection("lancamentos")
             .add({
@@ -160,7 +160,7 @@ app.post("/relatorio", async (req, res) => {
         const { email, telefone } = req.body;
 
         // 1 — Validar usuário
-        const snapshot = await db.collection("usuarios")
+        const snapshot = await db.collection("users")
             .where("email", "==", email)
             .where("telefone", "==", telefone)
             .get();
@@ -174,7 +174,7 @@ app.post("/relatorio", async (req, res) => {
         const userId = snapshot.docs[0].id;
 
         // 2 — Buscar lançamentos
-        const lancamentos = await db.collection("usuarios")
+        const lancamentos = await db.collection("users")
             .doc(userId)
             .collection("lancamentos")
             .orderBy("data", "desc")
