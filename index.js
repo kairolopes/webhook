@@ -6,11 +6,11 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 const admin = require('firebase-admin');
-const fs = require('fs');       // Módulo para manipular arquivos
-const os = require('os');       // Módulo para diretórios temporários
-const path = require('path');   // Módulo para caminhos de arquivo
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-// 1. INICIALIZAÇÃO EXPLÍCITA (FINAL FIX para Leitura de String)
+// Inicialização Firebase
 try {
     const serviceAccountJson = process.env.GOOGLE_APPLICATION_CREDENTIALS; 
     const projectId = process.env.GCLOUD_PROJECT;
@@ -19,20 +19,14 @@ try {
         throw new Error('As variáveis GOOGLE_APPLICATION_CREDENTIALS ou GCLOUD_PROJECT não estão definidas.');
     }
     
-    // 💡 TÁTICA FINAL: SALVAR O JSON TEMPORARIAMENTE COMO UM ARQUIVO
-    // 1. Define um caminho temporário no servidor Railway
     const tempFilePath = path.join(os.tmpdir(), 'serviceAccountKey.json');
+    fs.writeFileSync(tempFilePath, serviceAccountJson);
     
-    // 2. Escreve a string JSON (que está quebrada) no disco como um arquivo real
-    fs.writeFileSync(tempFilePath, serviceAccountJson); 
-
-    // 3. Inicializa o Firebase LENDO o arquivo temporário (Forma nativa do Node)
-    // O Node.js é muito bom em ler arquivos, mesmo que a string estivesse quebrada.
-    const serviceAccount = require(tempFilePath); 
+    const serviceAccount = require(tempFilePath);
 
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount), 
-        projectId: projectId 
+        credential: admin.credential.cert(serviceAccount),
+        projectId: projectId
     });
     
     console.log('Firebase inicializado com sucesso usando arquivo temporário!');
@@ -42,5 +36,14 @@ try {
 }
 
 const db = admin.firestore();
-const auth = admin.auth(); 
-// ... (O restante das Rotas /cadastro e /lancamento)
+const auth = admin.auth();
+
+// TEST ROUTE
+app.get("/", (req, res) => {
+    res.send("Webhook ativo no Railway!");
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`🔥 Servidor rodando na porta ${PORT}`);
+});
