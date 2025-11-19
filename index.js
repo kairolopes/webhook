@@ -100,7 +100,6 @@ app.post("/webhook", (req, res) => {
 // -------------------------------------------------------------
 // 4. 🧑‍💼 CADASTRO DE USUÁRIO (MANTIDO)
 // -------------------------------------------------------------
-
 app.post("/cadastro", async (req, res) => {
     try {
         const { email, password, nome, telefone, cpf } = req.body;
@@ -109,15 +108,30 @@ app.post("/cadastro", async (req, res) => {
             return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
 
-        const userRecord = await auth.createUser({ email, password });
+        // 1. VERIFICAÇÃO MÍNIMA
+        if (password.length < 6) {
+            return res.status(400).json({ error: "A senha deve ter no mínimo 6 caracteres." });
+        }
 
+        // 2. CRIAÇÃO NO AUTH COM TRATAMENTO DE ERRO
+        let userRecord;
+        try {
+            userRecord = await auth.createUser({ email, password });
+        } catch (authError) {
+            if (authError.code === 'auth/email-already-in-use') {
+                 return res.status(409).json({ error: "O email já está cadastrado no Firebase Auth." });
+            }
+            throw authError; 
+        }
+
+        // 3. SALVAR NO FIRESTORE
         await db.collection("users").doc(userRecord.uid).set({
             email, nome, telefone, cpf, criadoEm: new Date()
         });
 
         return res.json({
             status: "sucesso",
-            mensagem: "Usuário cadastrado!",
+            mensagem: "Usuário cadastrado e autenticado!",
             uid: userRecord.uid
         });
 
