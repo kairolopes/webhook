@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore + Autenticação (Versão 2.1 - FINAL)
+// 🚀 Servidor Webhook + Firebase Firestore + Autenticação (Versão 2.2 - FINAL)
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -46,11 +46,12 @@ const auth = admin.auth();
 // -------------------------------------------------------------
 
 /**
- * Busca o UID do usuário APENAS pelo e-mail (para robustez do webhook).
+ * Busca o UID do usuário APENAS pelo e-mail (robusto contra falhas de telefone).
  * @param {string} email
  * @returns {string} userId
  */
 async function getUserId(email) { 
+    // O email JÁ DEVE TER O .trim() APLICADO NA ROTA DE CHAMADA!
     const snapshot = await db.collection("users")
         .where("email", "==", email)
         .get(); 
@@ -88,6 +89,10 @@ app.post("/cadastro", async (req, res) => {
         if (!email || !password || !telefone) {
             return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
+        
+        // CORREÇÃO: Limpa o email e telefone antes de salvar
+        const cleanEmail = email.trim();
+        const cleanTelefone = telefone.trim();
 
         // 1. VERIFICAÇÃO MÍNIMA
         if (password.length < 6) {
@@ -97,7 +102,8 @@ app.post("/cadastro", async (req, res) => {
         // 2. CRIAÇÃO NO AUTH COM TRATAMENTO DE ERRO
         let userRecord;
         try {
-            userRecord = await auth.createUser({ email, password });
+            // Usa o e-mail limpo para o Firebase Auth
+            userRecord = await auth.createUser({ email: cleanEmail, password }); 
         } catch (authError) {
             if (authError.code === 'auth/email-already-in-use') {
                  return res.status(409).json({ error: "O email já está cadastrado no Firebase Auth." });
@@ -107,7 +113,11 @@ app.post("/cadastro", async (req, res) => {
 
         // 3. SALVAR NO FIRESTORE
         await db.collection("users").doc(userRecord.uid).set({
-            email, nome, telefone, cpf, criadoEm: new Date()
+            email: cleanEmail, // Salva limpo
+            nome, 
+            telefone: cleanTelefone, // Salva limpo
+            cpf, 
+            criadoEm: new Date()
         });
 
         return res.json({
@@ -149,8 +159,11 @@ app.post("/lancamento", async (req, res) => {
             return res.status(400).json({ error: "Campos obrigatórios faltando: email, telefone, tipo, valor, contaId, categoriaId, data." });
         }
 
-        // 1. BUSCA O UID (Apenas com o email)
-        const userId = await getUserId(email);
+        // CORREÇÃO FINAL: Limpa o email antes da busca
+        const cleanEmail = email.trim();
+
+        // 1. BUSCA O UID (Apenas com o email limpo)
+        const userId = await getUserId(cleanEmail); 
 
         // 2. BUSCA REAL DOS DETALHES DA CONTA NO FIRESTORE
         const accountDoc = await db.collection("users").doc(userId)
@@ -183,7 +196,7 @@ app.post("/lancamento", async (req, res) => {
             const amountPerInstallment = baseData.valor / numInstallments;
             const purchaseDate = new Date(data);
             
-            // Converte os dias de vencimento/fechamento para números (pode ser string no Firestore)
+            // Converte os dias de vencimento/fechamento para números
             const dueDay = accountData.dueDay ? parseInt(accountData.dueDay) : 10;
             const closingDay = accountData.closingDay ? parseInt(accountData.closingDay) : 25;
 
@@ -257,7 +270,7 @@ app.put("/lancamento/:transactionId", async (req, res) => {
             return res.status(400).json({ error: "Email, telefone e dados de atualização são obrigatórios." });
         }
 
-        const userId = await getUserId(email); // CORRIGIDO
+        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
 
         const transactionRef = db.collection("users")
             .doc(userId)
@@ -292,7 +305,7 @@ app.delete("/lancamento/:transactionId", async (req, res) => {
             return res.status(400).json({ error: "Email e telefone são obrigatórios para autenticação." });
         }
 
-        const userId = await getUserId(email); // CORRIGIDO
+        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
 
         const transactionRef = db.collection("users")
             .doc(userId)
@@ -325,7 +338,7 @@ app.post("/relatorio", async (req, res) => {
     try {
         const { email, telefone } = req.body;
 
-        const userId = await getUserId(email); // CORRIGIDO
+        const userId = await getUserId(email.trim()); // CORRIGIDO com .trim()
 
         const lancamentos = await db.collection("users")
             .doc(userId)
