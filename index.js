@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore + Autenticação
+// 🚀 Servidor Webhook + Firebase Firestore + Autenticação (Versão 2.0 - CRUD COMPLETO)
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -42,16 +42,53 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 2. 🌐 ROTA DE TESTE
+// FUNÇÕES AUXILIARES PARA MANTER A CONSISTÊNCIA DE DADOS
+// -------------------------------------------------------------
+
+/**
+ * Busca o UID do usuário pelo e-mail e telefone.
+ * @param {string} email
+ * @param {string} telefone
+ * @returns {string} userId
+ */
+async function getUserId(email, telefone) {
+    const snapshot = await db.collection("users")
+        .where("email", "==", email)
+        .where("telefone", "==", telefone)
+        .get();
+
+    if (snapshot.empty) {
+        throw new Error("Usuário não encontrado ou credenciais incorretas.");
+    }
+    return snapshot.docs[0].id;
+}
+
+/**
+ * Simula a busca de informações de conta/cartão que a aplicação faria.
+ * **NOTA:** No código real, esta função faria uma busca no Firestore.
+ * Aqui, usamos um retorno simplificado.
+ * @param {string} userId
+ * @param {string} accountId
+ * @returns {{type: string, dueDay: number, closingDay: number}}
+ */
+async function getAccountDetails(userId, accountId) {
+    // Para simplificar, assumimos que 'contaId' contém o tipo (ex: 'credito-nubank')
+    // Na prática, buscaríamos na subcoleção 'accounts' do usuário.
+    if (accountId && accountId.includes("credito")) {
+        // Valores padrão para lógica de cartão (dia 10 vence, dia 25 fecha)
+        return { type: 'credito', dueDay: 10, closingDay: 25 };
+    }
+    return { type: 'conta', dueDay: 0, closingDay: 0 };
+}
+
+
+// -------------------------------------------------------------
+// 2. 🌐 ROTA DE TESTE & 3. 🤖 ROTA WEBHOOK GERAL
 // -------------------------------------------------------------
 
 app.get("/", (req, res) => {
     res.send("Webhook ativo no Railway!");
 });
-
-// -------------------------------------------------------------
-// 3. 🤖 ROTA WEBHOOK GERAL
-// -------------------------------------------------------------
 
 app.post("/webhook", (req, res) => {
     return res.json({
@@ -61,7 +98,7 @@ app.post("/webhook", (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 4. 🧑‍💼 CADASTRO DE USUÁRIO
+// 4. 🧑‍💼 CADASTRO DE USUÁRIO (MANTIDO)
 // -------------------------------------------------------------
 
 app.post("/cadastro", async (req, res) => {
@@ -72,19 +109,10 @@ app.post("/cadastro", async (req, res) => {
             return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
 
-        // 1 — Criar usuário no Auth
-        const userRecord = await auth.createUser({
-            email,
-            password
-        });
+        const userRecord = await auth.createUser({ email, password });
 
-        // 2 — Salvar no Firestore
         await db.collection("users").doc(userRecord.uid).set({
-            email,
-            nome,
-            telefone,
-            cpf,
-            criadoEm: new Date()
+            email, nome, telefone, cpf, criadoEm: new Date()
         });
 
         return res.json({
@@ -101,86 +129,219 @@ app.post("/cadastro", async (req, res) => {
     }
 });
 
+
 // -------------------------------------------------------------
-// 5. 💸 LANÇAMENTO FINANCEIRO (VALIDA TELEFONE + EMAIL)
+// 5. 💸 LANÇAMENTO FINANCEIRO (INSERÇÃO - COM LÓGICA DE PARCELAMENTO)
 // -------------------------------------------------------------
 
 app.post("/lancamento", async (req, res) => {
     try {
-        const { email, telefone, tipo, valor, descricao } = req.body;
+        const {
+            email,
+            telefone,
+            tipo,
+            contaId,       // Novo campo obrigatório
+            categoriaId,   // Novo campo
+            subcategoria,  // Novo campo
+            descricao,
+            valor,
+            data,
+            installments = 1 // Novo campo para parcelas
+        } = req.body;
 
-        if (!email || !telefone || !tipo || !valor) {
-            return res.status(400).json({ error: "Dados obrigatórios faltando." });
+        if (!email || !telefone || !tipo || !valor || !contaId || !categoriaId || !data) {
+            return res.status(400).json({ error: "Campos obrigatórios faltando: email, telefone, tipo, valor, contaId, categoriaId, data." });
         }
 
-        // 1 — Buscar usuário
-        const snapshot = await db.collection("users")
-            .where("email", "==", email)
-            .where("telefone", "==", telefone)
-            .get();
+        const userId = await getUserId(email, telefone);
+        const account = await getAccountDetails(userId, contaId);
+        const isCreditCard = account.type === 'credito' && tipo === 'expense';
+        const numInstallments = parseInt(installments);
+        
+        let transacoesParaAdicionar = [];
+        const baseData = {
+            tipo,
+            contaId,
+            categoriaId,
+            subcategoria: subcategoria || "",
+            descricao,
+            valor: Number(valor),
+            data: data, // string YYYY-MM-DD
+            criadoEm: new Date(),
+            installments: numInstallments,
+        };
 
-        if (snapshot.empty) {
-            return res.status(401).json({
-                error: "Usuário não encontrado ou telefone não corresponde ao email."
-            });
+        // Lógica de Parcelamento (replicada do Frontend)
+        if (isCreditCard && numInstallments > 1) {
+            const amountPerInstallment = baseData.valor / numInstallments;
+            const purchaseDate = new Date(data);
+
+            for (let i = 0; i < numInstallments; i++) {
+                let finalDate = new Date(data); // Inicia com a data da compra
+                finalDate.setDate(account.dueDay); // Define o dia de vencimento
+
+                let finalMonth = purchaseDate.getMonth() + i;
+                let finalYear = purchaseDate.getFullYear();
+
+                // Lógica de avanço de mês: 
+                // A primeira parcela pode pular um mês se a compra foi depois do fechamento.
+                if (i === 0 && purchaseDate.getDate() > account.closingDay) {
+                    finalMonth += 1; 
+                }
+                
+                // Avança o mês e corrige o ano
+                finalMonth += i; 
+
+                if (finalMonth > 11) {
+                    finalYear += Math.floor(finalMonth / 12);
+                    finalMonth = finalMonth % 12;
+                }
+
+                finalDate.setFullYear(finalYear, finalMonth, account.dueDay);
+
+                transacoesParaAdicionar.push({
+                    ...baseData,
+                    amount: amountPerInstallment,
+                    descricao: `${baseData.descricao} (${i + 1}/${numInstallments})`,
+                    data: finalDate.toISOString().substring(0, 10),
+                    isInstallment: true,
+                });
+            }
+        } else {
+            // Lançamento único (ou despesa em dinheiro/conta)
+            transacoesParaAdicionar.push(baseData);
         }
 
-        const userId = snapshot.docs[0].id;
+        // Registrar todas as transações
+        const batch = db.batch();
+        const transactionsColRef = db.collection("users").doc(userId).collection("transactions");
+        
+        transacoesParaAdicionar.forEach(t => {
+            batch.set(transactionsColRef.doc(), t);
+        });
 
-        // 2 — Registrar lançamento
-        await db.collection("users")
-            .doc(userId)
-            .collection("lancamentos")
-            .add({
-                tipo,
-                valor,
-                descricao: descricao || "",
-                data: new Date()
-            });
+        await batch.commit();
 
         return res.json({
             status: "sucesso",
-            mensagem: "Lançamento registrado."
+            mensagem: `${transacoesParaAdicionar.length} Lançamento(s) registrado(s).`,
+            userId
         });
 
     } catch (error) {
         return res.status(500).json({
-            error: "Erro ao registrar lançamento.",
+            error: "Erro no lançamento.",
+            details: error.message
+        });
+    }
+});
+
+// --- NOVAS ROTAS PARA PERMITIR ALTERAÇÃO E EXCLUSÃO (CRUD COMPLETO) ---
+
+// -------------------------------------------------------------
+// 6. 🔄 ALTERAÇÃO (UPDATE) DE LANÇAMENTO
+// -------------------------------------------------------------
+
+/**
+ * Permite alterar qualquer campo de uma transação específica.
+ * Rota: PUT /lancamento/T6Bf9L...
+ * Corpo: { email: "user@x.com", telefone: "119999", valor: 50.00, descricao: "Novo item" }
+ */
+app.put("/lancamento/:transactionId", async (req, res) => {
+    try {
+        const { transactionId } = req.params;
+        const { email, telefone, ...updatedFields } = req.body;
+
+        if (!email || !telefone || Object.keys(updatedFields).length === 0) {
+            return res.status(400).json({ error: "Email, telefone e dados de atualização são obrigatórios." });
+        }
+
+        const userId = await getUserId(email, telefone);
+
+        const transactionRef = db.collection("users")
+            .doc(userId)
+            .collection("transactions")
+            .doc(transactionId);
+
+        // O Admin SDK usa set() com merge: true para atualizar o documento.
+        await transactionRef.set(updatedFields, { merge: true });
+
+        return res.json({
+            status: "sucesso",
+            mensagem: `Lançamento ${transactionId} atualizado.`,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            error: "Erro ao atualizar lançamento.",
+            details: error.message
+        });
+    }
+});
+
+
+// -------------------------------------------------------------
+// 7. 🗑️ EXCLUSÃO (DELETE) DE LANÇAMENTO
+// -------------------------------------------------------------
+
+/**
+ * Permite excluir um lançamento específico.
+ * Rota: DELETE /lancamento/T6Bf9L...
+ * Corpo: { email: "user@x.com", telefone: "119999" }
+ */
+app.delete("/lancamento/:transactionId", async (req, res) => {
+    try {
+        const { transactionId } = req.params;
+        const { email, telefone } = req.body; // Usa BODY para segurança (evita passar dados sensíveis na URL)
+
+        if (!email || !telefone) {
+            return res.status(400).json({ error: "Email e telefone são obrigatórios para autenticação." });
+        }
+
+        const userId = await getUserId(email, telefone);
+
+        const transactionRef = db.collection("users")
+            .doc(userId)
+            .collection("transactions")
+            .doc(transactionId);
+
+        await transactionRef.delete();
+
+        return res.json({
+            status: "sucesso",
+            mensagem: `Lançamento ${transactionId} excluído.`,
+        });
+    } catch (error) {
+        // Retorna 404 se o documento não existir, 500 para outros erros
+        if (error.message.includes("Usuário não encontrado")) {
+             return res.status(401).json({ error: error.message });
+        }
+        return res.status(500).json({
+            error: "Erro ao excluir lançamento.",
             details: error.message
         });
     }
 });
 
 // -------------------------------------------------------------
-// 6. 📊 RELATÓRIO FINANCEIRO
+// 8. 📊 RELATÓRIO FINANCEIRO (CONSULTA - MANTIDO, REORDENADO)
 // -------------------------------------------------------------
 
 app.post("/relatorio", async (req, res) => {
     try {
         const { email, telefone } = req.body;
 
-        // 1 — Validar usuário
-        const snapshot = await db.collection("users")
-            .where("email", "==", email)
-            .where("telefone", "==", telefone)
-            .get();
+        const userId = await getUserId(email, telefone);
 
-        if (snapshot.empty) {
-            return res.status(401).json({
-                error: "Usuário não encontrado."
-            });
-        }
-
-        const userId = snapshot.docs[0].id;
-
-        // 2 — Buscar lançamentos
         const lancamentos = await db.collection("users")
             .doc(userId)
-            .collection("lancamentos")
+            .collection("transactions") // Usando 'transactions' para consistência com o HTML
             .orderBy("data", "desc")
             .get();
 
-        const lista = lancamentos.docs.map(doc => doc.data());
+        const lista = lancamentos.docs.map(doc => ({ 
+             id: doc.id, 
+             ...doc.data() 
+        }));
 
         return res.json({
             status: "sucesso",
@@ -197,7 +358,7 @@ app.post("/relatorio", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 7. 🚀 INICIAR SERVIDOR
+// 9. 🚀 INICIAR SERVIDOR
 // -------------------------------------------------------------
 
 app.listen(PORT, () => {
