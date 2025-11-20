@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore + Autenticação — Versão Oficial 3.0
+// 🚀 Servidor Webhook + Firebase Firestore + Autenticação — Versão Oficial 3.1
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -311,7 +311,45 @@ app.post("/relatorio", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 🚀 9. INICIAR SERVIDOR
+// 📂 9. LISTAR CONTAS DO USUÁRIO  (NOVO ENDPOINT)
+// -------------------------------------------------------------
+app.get("/contas", async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ error: "Email obrigatório." });
+        }
+
+        const userId = await findUserIdByEmail(email);
+
+        const snapshot = await db
+            .collection("users")
+            .doc(userId)
+            .collection("accounts")
+            .get();
+
+        const contas = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+
+        res.json({
+            status: "sucesso",
+            total: contas.length,
+            contas
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            error: "Erro ao buscar contas.",
+            details: err.message
+        });
+    }
+});
+
+// -------------------------------------------------------------
+// 🚀 10. INICIAR SERVIDOR
 // -------------------------------------------------------------
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
