@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore — FINAL FUNCIONAL
+// 🚀 Servidor Webhook + Firebase Firestore — VERSÃO COMPLETA FINAL
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -14,7 +14,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
-// 🔥 Inicialização Firebase (Railway Safe)
+// 🔥 Firebase Init (Railway Safe)
 // -------------------------------------------------------------
 try {
   const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -30,7 +30,7 @@ try {
 
   console.log("✅ Firebase conectado");
 } catch (err) {
-  console.error("Firebase ERROR:", err.message);
+  console.error("❌ Firebase ERROR:", err.message);
   process.exit(1);
 }
 
@@ -38,105 +38,121 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 🔎 Buscar usuário
+// 🔧 Função - Buscar usuário por email (Auth + Firestore)
 // -------------------------------------------------------------
 async function findUserIdByEmail(email) {
   const cleanEmail = email.trim().toLowerCase();
+
   try {
     const user = await auth.getUserByEmail(cleanEmail);
     return user.uid;
-  } catch (err) {
+  } catch (_) {
     const snap = await db.collection("users")
       .where("email", "==", cleanEmail)
       .limit(1)
       .get();
 
-    if (snap.empty) throw new Error("Usuário não encontrado");
+    if (snap.empty) {
+      throw new Error("Usuário não encontrado");
+    }
 
     return snap.docs[0].id;
   }
 }
 
 // -------------------------------------------------------------
-// ✅ TESTE
+// 🔧 Função - Similaridade simples de nome de conta (JS puro)
+// -------------------------------------------------------------
+function findContaSimilar(contas, textoBusca) {
+  const busca = textoBusca.toLowerCase();
+
+  let melhor = null;
+  let maiorPontuacao = 0;
+
+  contas.forEach(conta => {
+    const nome = (conta.nome || "").toLowerCase();
+
+    let pontos = 0;
+    for (let letra of busca) {
+      if (nome.includes(letra)) {
+        pontos++;
+      }
+    }
+
+    if (pontos > maiorPontuacao) {
+      maiorPontuacao = pontos;
+      melhor = conta;
+    }
+  });
+
+  return melhor;
+}
+
+// -------------------------------------------------------------
+// ✅ Rota teste
 // -------------------------------------------------------------
 app.get("/", (req, res) => {
   res.json({ status: "ok" });
 });
 
-
 // -------------------------------------------------------------
-// 👤 4. CADASTRO DE USUÁRIO (com bloqueio real de duplicidade)
+// 👤 CADASTRO - BLOQUEIA EMAIL E TELEFONE REPETIDOS
 // -------------------------------------------------------------
 app.post("/cadastro", async (req, res) => {
   try {
     const { email, password, nome, telefone, cpf } = req.body;
 
     if (!email || !password || !nome || !telefone) {
-      return res.status(400).json({ error: "Campos obrigatórios faltando." });
+      return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = telefone.trim();
 
-    // 🔒 1. Verifica email no Firebase Auth
-    try {
-      await auth.getUserByEmail(cleanEmail);
-      return res.status(409).json({ error: "Email já cadastrado (Auth)." });
-    } catch (_) {}
-
-    // 🔒 2. Verifica email no Firestore
-    const emailSnap = await db.collection("users")
-      .where("email", "==", cleanEmail)
-      .limit(1)
-      .get();
-
-    if (!emailSnap.empty) {
-      return res.status(409).json({ error: "Email já cadastrado (Firestore)." });
-    }
-
-    // 🔒 3. Verifica telefone duplicado
-    const phoneSnap = await db.collection("users")
+    // 🔒 Verificar telefone duplicado
+    const telSnap = await db.collection("users")
       .where("telefone", "==", cleanPhone)
       .limit(1)
       .get();
 
-    if (!phoneSnap.empty) {
-      return res.status(409).json({ error: "Telefone já cadastrado." });
+    if (!telSnap.empty) {
+      return res.status(409).json({ error: "Telefone já cadastrado" });
     }
 
-    // ✅ 4. Criar usuário no Auth
-    const user = await auth.createUser({
-      email: cleanEmail,
-      password
-    });
+    let user;
 
-    // ✅ 5. Salvar no Firestore
+    try {
+      user = await auth.createUser({
+        email: cleanEmail,
+        password
+      });
+    } catch (err) {
+      if (err.code === "auth/email-already-exists") {
+        return res.status(409).json({ error: "Email já cadastrado" });
+      }
+      throw err;
+    }
+
     await db.collection("users").doc(user.uid).set({
       email: cleanEmail,
       nome,
       telefone: cleanPhone,
-      cpf: cpf || "",
+      cpf,
       criadoEm: new Date()
     });
 
     res.json({
       status: "sucesso",
-      uid: user.uid,
-      mensagem: "Usuário criado com sucesso."
+      uid: user.uid
     });
 
   } catch (err) {
-    res.status(500).json({
-      error: "Erro no cadastro",
-      details: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
-
 // -------------------------------------------------------------
-// 💸 CRIAR LANÇAMENTO — SEM BLOQUEAR CONTA
+// 💸 LANÇAMENTO — COM contaId OU contaNome (similaridade)
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
   try {
@@ -144,6 +160,7 @@ app.post("/lancamento", async (req, res) => {
       email,
       tipo,
       contaId,
+      contaNome,
       categoriaId,
       subcategoria = "",
       descricao = "",
@@ -158,29 +175,30 @@ app.post("/lancamento", async (req, res) => {
 
     const userId = await findUserIdByEmail(email);
 
-    // ✅ NÃO BLOQUEIA SE CONTA NÃO EXISTIR
-    let contaExiste = false;
-    if (contaId) {
-      const accSnap = await db.collection("users")
-        .doc(userId)
-        .collection("accounts")
-        .doc(contaId)
-        .get();
+    let contaIdFinal = "SEM_CONTA";
 
-      contaExiste = accSnap.exists;
+    // 1) Se veio contaId, usa direto
+    if (contaId) {
+      contaIdFinal = contaId;
     }
 
-    const base = {
-      tipo,
-      contaId: contaExiste ? contaId : "SEM_CONTA",
-      categoriaId,
-      subcategoria,
-      descricao,
-      valor: Number(valor),
-      data,
-      criadoEm: new Date(),
-      installments: Number(installments)
-    };
+    // 2) Se veio contaNome, busca parecido
+    if (!contaId && contaNome) {
+      const snap = await db.collection("users")
+        .doc(userId)
+        .collection("accounts")
+        .get();
+
+      const contas = snap.docs.map(d => ({
+        id: d.id,
+        nome: d.data().name || d.data().nome || ""
+      }));
+
+      const conta = findContaSimilar(contas, contaNome);
+      if (conta) {
+        contaIdFinal = conta.id;
+      }
+    }
 
     const ref = db.collection("users")
       .doc(userId)
@@ -188,11 +206,26 @@ app.post("/lancamento", async (req, res) => {
 
     const n = Number(installments);
 
+    const base = {
+      tipo,
+      contaId: contaIdFinal,
+      contaNomeDigitado: contaNome || "",
+      categoriaId,
+      subcategoria,
+      descricao,
+      valor: Number(valor),
+      data,
+      criadoEm: new Date(),
+      installments: n
+    };
+
+    // ➕ SE NÃO FOR PARCELADO
     if (n <= 1) {
       await ref.add(base);
-      return res.json({ status: "sucesso", mensagem: "Lançamento salvo" });
+      return res.json({ status: "sucesso", mensagem: "Lançamento criado" });
     }
 
+    // ➕ SE FOR PARCELADO
     const valorParcela = base.valor / n;
     const batch = db.batch();
 
@@ -216,7 +249,7 @@ app.post("/lancamento", async (req, res) => {
 
     res.json({
       status: "sucesso",
-      mensagem: "Parcelas criadas com sucesso"
+      mensagem: `${n} parcelas criadas`
     });
 
   } catch (err) {
@@ -228,7 +261,7 @@ app.post("/lancamento", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 📄 Listar Contas
+// 📂 LISTAR CONTAS
 // -------------------------------------------------------------
 app.get("/contas", async (req, res) => {
   try {
@@ -253,7 +286,7 @@ app.get("/contas", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 📊 Listar Lançamentos
+// 📊 LISTAR TRANSAÇÕES
 // -------------------------------------------------------------
 app.get("/transacoes", async (req, res) => {
   try {
