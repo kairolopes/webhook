@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore — FINAL FUNCIONAL
+// 🚀 Servidor Webhook + Firebase Firestore — VERSÃO FINAL COMPLETA
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -14,11 +14,14 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
-// 🔥 Inicialização Firebase (Railway Safe)
+// 🔥 Inicialização Firebase (Railway Safe Mode)
 // -------------------------------------------------------------
 try {
   const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   const projectId = process.env.GCLOUD_PROJECT;
+
+  if (!jsonString) throw new Error("GOOGLE_APPLICATION_CREDENTIALS ausente");
+  if (!projectId) throw new Error("GCLOUD_PROJECT ausente");
 
   const tempPath = path.join(os.tmpdir(), "firebase_key.json");
   fs.writeFileSync(tempPath, jsonString);
@@ -28,9 +31,9 @@ try {
     projectId,
   });
 
-  console.log("✅ Firebase conectado");
+  console.log("🔥 Firebase inicializado com sucesso");
 } catch (err) {
-  console.error("Firebase ERROR:", err.message);
+  console.error("❌ Firebase init error:", err.message);
   process.exit(1);
 }
 
@@ -38,34 +41,89 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 🔎 Buscar usuário
+// 🔧 Função: Buscar UID por email
 // -------------------------------------------------------------
 async function findUserIdByEmail(email) {
   const cleanEmail = email.trim().toLowerCase();
+
   try {
     const user = await auth.getUserByEmail(cleanEmail);
     return user.uid;
-  } catch (err) {
-    const snap = await db.collection("users")
-      .where("email", "==", cleanEmail)
-      .limit(1)
-      .get();
+  } catch (_) {}
 
-    if (snap.empty) throw new Error("Usuário não encontrado");
+  const snap = await db.collection("users")
+    .where("email", "==", cleanEmail)
+    .limit(1)
+    .get();
 
-    return snap.docs[0].id;
+  if (snap.empty) {
+    throw new Error("Usuário não existe (nem no Auth, nem no Firestore).");
   }
+
+  return snap.docs[0].id;
 }
 
 // -------------------------------------------------------------
-// ✅ TESTE
+// ✅ Health check
 // -------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", message: "Servidor ativo" });
 });
 
 // -------------------------------------------------------------
-// 💸 CRIAR LANÇAMENTO — SEM BLOQUEAR CONTA
+// 👤 Cadastro com bloqueio de duplicados
+// -------------------------------------------------------------
+app.post("/cadastro", async (req, res) => {
+  try {
+    const { email, password, nome, telefone, cpf } = req.body;
+
+    if (!email || !password || !nome || !telefone) {
+      return res.status(400).json({ error: "Campos obrigatórios faltando" });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanTelefone = telefone.trim();
+
+    // ❌ Bloquear email duplicado
+    try {
+      await auth.getUserByEmail(cleanEmail);
+      return res.status(409).json({ error: "Email já cadastrado" });
+    } catch (_) {}
+
+    // ❌ Bloquear telefone duplicado
+    const telSnap = await db.collection("users")
+      .where("telefone", "==", cleanTelefone)
+      .limit(1)
+      .get();
+
+    if (!telSnap.empty) {
+      return res.status(409).json({ error: "Telefone já cadastrado" });
+    }
+
+    // ✅ Criar no Firebase Auth
+    const user = await auth.createUser({
+      email: cleanEmail,
+      password
+    });
+
+    // ✅ Salvar no Firestore
+    await db.collection("users").doc(user.uid).set({
+      email: cleanEmail,
+      nome,
+      telefone: cleanTelefone,
+      cpf: cpf || "",
+      criadoEm: new Date()
+    });
+
+    res.json({ status: "sucesso", uid: user.uid });
+
+  } catch (err) {
+    res.status(500).json({ error: "Erro no cadastro", details: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 💸 Criar Lançamento
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
   try {
@@ -74,90 +132,83 @@ app.post("/lancamento", async (req, res) => {
       tipo,
       contaId,
       categoriaId,
-      subcategoria = "",
-      descricao = "",
+      subcategoria,
+      descricao,
       valor,
       data,
       installments = 1
     } = req.body;
 
-    if (!email || !valor || !data) {
-      return res.status(400).json({ error: "Campos mínimos faltando" });
+    if (!email || !tipo || !valor || !contaId || !categoriaId || !data) {
+      return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
     const userId = await findUserIdByEmail(email);
 
-    // ✅ NÃO BLOQUEIA SE CONTA NÃO EXISTIR
-    let contaExiste = false;
-    if (contaId) {
-      const accSnap = await db.collection("users")
-        .doc(userId)
-        .collection("accounts")
-        .doc(contaId)
-        .get();
+    const accountRef = db.collection("users")
+      .doc(userId)
+      .collection("accounts")
+      .doc(contaId);
 
-      contaExiste = accSnap.exists;
+    const account = await accountRef.get();
+    if (!account.exists) {
+      return res.status(404).json({ error: "Conta não encontrada" });
     }
+
+    const parcelas = parseInt(installments);
+    const valorNum = Number(valor);
 
     const base = {
       tipo,
-      contaId: contaExiste ? contaId : "SEM_CONTA",
+      contaId,
       categoriaId,
-      subcategoria,
+      subcategoria: subcategoria || "",
       descricao,
-      valor: Number(valor),
+      valor: valorNum,
       data,
       criadoEm: new Date(),
-      installments: Number(installments)
+      installments: parcelas
     };
 
     const ref = db.collection("users")
       .doc(userId)
       .collection("transactions");
 
-    const n = Number(installments);
-
-    if (n <= 1) {
+    if (parcelas <= 1) {
       await ref.add(base);
-      return res.json({ status: "sucesso", mensagem: "Lançamento salvo" });
+      return res.json({ status: "sucesso", mensagem: "Lançamento criado" });
     }
 
-    const valorParcela = base.valor / n;
+    const valorParcela = valorNum / parcelas;
     const batch = db.batch();
 
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < parcelas; i++) {
       const d = new Date(data);
       d.setMonth(d.getMonth() + i);
 
       const item = {
         ...base,
         valor: valorParcela,
-        descricao: `${descricao} (${i + 1}/${n})`,
+        descricao: `${descricao} (${i + 1}/${parcelas})`,
         data: d.toISOString().split("T")[0],
         isInstallment: true
       };
 
-      const docRef = ref.doc();
-      batch.set(docRef, item);
+      const doc = ref.doc();
+      batch.set(doc, item);
     }
 
     await batch.commit();
 
-    res.json({
-      status: "sucesso",
-      mensagem: "Parcelas criadas com sucesso"
-    });
+    res.json({ status: "sucesso", mensagem: `${parcelas} parcelas criadas` });
 
   } catch (err) {
-    res.status(500).json({
-      error: "Erro no lançamento",
-      details: err.message
-    });
+    res.status(500).json({ error: "Erro no lançamento", details: err.message });
   }
 });
 
 // -------------------------------------------------------------
-// 📄 Listar Contas
+// 📂 Listar contas
 // -------------------------------------------------------------
 app.get("/contas", async (req, res) => {
   try {
@@ -169,10 +220,7 @@ app.get("/contas", async (req, res) => {
       .collection("accounts")
       .get();
 
-    const contas = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
+    const contas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     res.json({ status: "sucesso", contas });
 
@@ -182,25 +230,22 @@ app.get("/contas", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 📊 Listar Lançamentos
+// 📊 Relatório
 // -------------------------------------------------------------
-app.get("/transacoes", async (req, res) => {
+app.post("/relatorio", async (req, res) => {
   try {
-    const { email } = req.query;
+    const { email } = req.body;
     const userId = await findUserIdByEmail(email);
 
-    const snap = await db.collection("users")
+    const snapshot = await db.collection("users")
       .doc(userId)
       .collection("transactions")
-      .orderBy("criadoEm", "desc")
+      .orderBy("data", "desc")
       .get();
 
-    const list = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
+    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    res.json({ status: "sucesso", list });
+    res.json({ status: "sucesso", total: list.length, list });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -208,8 +253,8 @@ app.get("/transacoes", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 🚀 START
+// 🚀 Start
 // -------------------------------------------------------------
 app.listen(PORT, () => {
-  console.log("🚀 API rodando na porta", PORT);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
