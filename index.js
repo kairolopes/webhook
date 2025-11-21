@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore + Autenticação — Versão Oficial 3.1
+// 🚀 Servidor Webhook + Firebase Firestore + Autenticação — VERSÃO 3.2 (AUTO-SYNC)
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -14,7 +14,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
-// 🔥 1. INICIALIZAÇÃO (Railway + Firebase) — LIMPA, ROBUSTA, SEGURA
+// 🔥 1. INICIALIZAÇÃO
 // -------------------------------------------------------------
 try {
     const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -41,32 +41,52 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 🔧 2. FUNÇÃO PARA BUSCAR UID PELO EMAIL (VERSÃO MAIS SEGURA)
+// 🔧 2. FUNÇÃO INTELIGENTE - BUSCA OU CRIA USER NO FIRESTORE
 // -------------------------------------------------------------
-async function findUserIdByEmail(email) {
+async function findOrCreateUser(email, telefone = "") {
     const cleanEmail = email.trim().toLowerCase();
 
+    // Primeiro tenta Firestore
     const snapshot = await db
         .collection("users")
         .where("email", "==", cleanEmail)
         .get();
 
-    if (snapshot.empty) {
-        throw new Error("Usuário não encontrado.");
+    if (!snapshot.empty) {
+        return snapshot.docs[0].id;
     }
 
-    return snapshot.docs[0].id;
+    // Se não achou → tenta Auth
+    let userRecord;
+    try {
+        userRecord = await auth.getUserByEmail(cleanEmail);
+    } catch {
+        throw new Error("Usuário não existe (nem no Auth, nem no Firestore).");
+    }
+
+    // Se achou no Auth, cria no Firestore automaticamente
+    const uid = userRecord.uid;
+
+    await db.collection("users").doc(uid).set({
+        email: cleanEmail,
+        telefone: telefone || "",
+        criadoEm: new Date()
+    });
+
+    console.log("✅ Usuário criado automaticamente no Firestore:", cleanEmail);
+
+    return uid;
 }
 
 // -------------------------------------------------------------
-// 🧪 3. ROTA DE TESTE
+// 🧪 3. ROTA TESTE
 // -------------------------------------------------------------
 app.get("/", (req, res) => {
-    res.json({ status: "online", message: "Servidor rodando no Railway." });
+    res.json({ status: "online", message: "Servidor funcionando." });
 });
 
 // -------------------------------------------------------------
-// 🧑‍💼 4. CADASTRO DE USUÁRIO
+// 🧑‍💼 4. CADASTRO
 // -------------------------------------------------------------
 app.post("/cadastro", async (req, res) => {
     try {
@@ -79,44 +99,31 @@ app.post("/cadastro", async (req, res) => {
         const cleanEmail = email.trim().toLowerCase();
         const cleanPhone = telefone.trim();
 
-        if (password.length < 6) {
-            return res.status(400).json({ error: "A senha deve ter 6+ caracteres." });
-        }
-
-        let userRecord;
-        try {
-            userRecord = await auth.createUser({
-                email: cleanEmail,
-                password: password
-            });
-        } catch (e) {
-            if (e.code === "auth/email-already-in-use") {
-                return res.status(409).json({ error: "Email já cadastrado." });
-            }
-            throw e;
-        }
+        const userRecord = await auth.createUser({
+            email: cleanEmail,
+            password: password
+        });
 
         await db.collection("users").doc(userRecord.uid).set({
             email: cleanEmail,
             nome,
             telefone: cleanPhone,
             cpf,
-            criadoEm: new Date(),
+            criadoEm: new Date()
         });
 
         res.json({
             status: "sucesso",
-            uid: userRecord.uid,
-            mensagem: "Usuário criado."
+            uid: userRecord.uid
         });
 
     } catch (err) {
-        res.status(500).json({ error: "Erro ao cadastrar.", details: err.message });
+        res.status(500).json({ error: "Erro cadastro", details: err.message });
     }
 });
 
 // -------------------------------------------------------------
-// 💸 5. CRIAR LANÇAMENTO
+// 💸 5. LANÇAMENTO (ATUALIZADO COM AUTO-SYNC)
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
     try {
@@ -133,11 +140,11 @@ app.post("/lancamento", async (req, res) => {
             installments = 1
         } = req.body;
 
-        if (!email || !telefone || !tipo || !valor || !contaId || !categoriaId || !data) {
+        if (!email || !tipo || !valor || !contaId || !categoriaId || !data) {
             return res.status(400).json({ error: "Campos obrigatórios faltando." });
         }
 
-        const userId = await findUserIdByEmail(email);
+        const userId = await findOrCreateUser(email, telefone);
 
         const account = await db
             .collection("users")
@@ -147,9 +154,7 @@ app.post("/lancamento", async (req, res) => {
             .get();
 
         if (!account.exists) {
-            return res.status(404).json({
-                error: "Conta não encontrada.",
-            });
+            return res.status(404).json({ error: "Conta não encontrada." });
         }
 
         const accountData = account.data();
@@ -180,15 +185,12 @@ app.post("/lancamento", async (req, res) => {
                 let month = purchaseDate.getMonth();
                 let year = purchaseDate.getFullYear();
 
-                if (i === 0 && purchaseDate.getDate() > close) {
-                    month++;
-                }
-
+                if (i === 0 && purchaseDate.getDate() > close) month++;
                 month += i;
 
                 if (month > 11) {
                     year += Math.floor(month / 12);
-                    month %= 12;
+                    month = month % 12;
                 }
 
                 const finalDate = new Date(year, month, due);
@@ -201,7 +203,6 @@ app.post("/lancamento", async (req, res) => {
                     isInstallment: true
                 });
             }
-
         } else {
             lancamentos.push(base);
         }
@@ -214,114 +215,21 @@ app.post("/lancamento", async (req, res) => {
 
         res.json({
             status: "sucesso",
-            mensagem: `${lancamentos.length} lançamento(s) registrado(s).`,
-            userId
+            total: lancamentos.length
         });
 
     } catch (err) {
-        res.status(500).json({
-            error: "Erro no lançamento.",
-            details: err.message
-        });
+        res.status(500).json({ error: "Erro no lançamento", details: err.message });
     }
 });
 
 // -------------------------------------------------------------
-// ✏️ 6. ALTERAR LANÇAMENTO
-// -------------------------------------------------------------
-app.put("/lancamento/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { email, telefone, ...fields } = req.body;
-
-        if (!email || !telefone) {
-            return res.status(400).json({ error: "Email + telefone obrigatórios." });
-        }
-
-        if (Object.keys(fields).length === 0) {
-            return res.status(400).json({ error: "Nenhum campo enviado para atualizar." });
-        }
-
-        const userId = await findUserIdByEmail(email);
-
-        await db
-            .collection("users")
-            .doc(userId)
-            .collection("transactions")
-            .doc(id)
-            .set(fields, { merge: true });
-
-        res.json({ status: "sucesso", mensagem: "Lançamento atualizado." });
-
-    } catch (err) {
-        res.status(500).json({ error: "Erro ao atualizar.", details: err.message });
-    }
-});
-
-// -------------------------------------------------------------
-// 🗑️ 7. EXCLUIR LANÇAMENTO
-// -------------------------------------------------------------
-app.delete("/lancamento/:id", async (req, res) => {
-    try {
-        const { email, telefone } = req.body;
-        const { id } = req.params;
-
-        if (!email || !telefone) {
-            return res.status(400).json({ error: "Email + telefone obrigatórios." });
-        }
-
-        const userId = await findUserIdByEmail(email);
-
-        await db
-            .collection("users")
-            .doc(userId)
-            .collection("transactions")
-            .doc(id)
-            .delete();
-
-        res.json({ status: "sucesso", mensagem: "Lançamento excluído." });
-
-    } catch (err) {
-        res.status(500).json({ error: "Erro ao excluir.", details: err.message });
-    }
-});
-
-// -------------------------------------------------------------
-// 📊 8. RELATÓRIO
-// -------------------------------------------------------------
-app.post("/relatorio", async (req, res) => {
-    try {
-        const { email } = req.body;
-        const userId = await findUserIdByEmail(email);
-
-        const snapshot = await db
-            .collection("users")
-            .doc(userId)
-            .collection("transactions")
-            .orderBy("data", "desc")
-            .get();
-
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        res.json({ status: "sucesso", total: list.length, lancamentos: list });
-
-    } catch (err) {
-        res.status(500).json({ error: "Erro no relatório.", details: err.message });
-    }
-});
-
-// -------------------------------------------------------------
-// 📂 9. LISTAR CONTAS DO USUÁRIO  (NOVO ENDPOINT)
+// 📂 6. LISTAR CONTAS
 // -------------------------------------------------------------
 app.get("/contas", async (req, res) => {
     try {
         const { email } = req.query;
-
-        if (!email) {
-            return res.status(400).json({ error: "Email obrigatório." });
-        }
-
-        const userId = await findUserIdByEmail(email);
+        const userId = await findOrCreateUser(email);
 
         const snapshot = await db
             .collection("users")
@@ -334,22 +242,14 @@ app.get("/contas", async (req, res) => {
             ...doc.data()
         }));
 
-        res.json({
-            status: "sucesso",
-            total: contas.length,
-            contas
-        });
-
+        res.json({ status: "sucesso", contas });
     } catch (err) {
-        res.status(500).json({
-            error: "Erro ao buscar contas.",
-            details: err.message
-        });
+        res.status(500).json({ error: "Erro contas", details: err.message });
     }
 });
 
 // -------------------------------------------------------------
-// 🚀 10. INICIAR SERVIDOR
+// 🚀 7. START SERVER
 // -------------------------------------------------------------
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
