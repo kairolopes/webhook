@@ -64,6 +64,77 @@ app.get("/", (req, res) => {
   res.json({ status: "ok" });
 });
 
+
+// -------------------------------------------------------------
+// 👤 4. CADASTRO DE USUÁRIO (com bloqueio real de duplicidade)
+// -------------------------------------------------------------
+app.post("/cadastro", async (req, res) => {
+  try {
+    const { email, password, nome, telefone, cpf } = req.body;
+
+    if (!email || !password || !nome || !telefone) {
+      return res.status(400).json({ error: "Campos obrigatórios faltando." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = telefone.trim();
+
+    // 🔒 1. Verifica email no Firebase Auth
+    try {
+      await auth.getUserByEmail(cleanEmail);
+      return res.status(409).json({ error: "Email já cadastrado (Auth)." });
+    } catch (_) {}
+
+    // 🔒 2. Verifica email no Firestore
+    const emailSnap = await db.collection("users")
+      .where("email", "==", cleanEmail)
+      .limit(1)
+      .get();
+
+    if (!emailSnap.empty) {
+      return res.status(409).json({ error: "Email já cadastrado (Firestore)." });
+    }
+
+    // 🔒 3. Verifica telefone duplicado
+    const phoneSnap = await db.collection("users")
+      .where("telefone", "==", cleanPhone)
+      .limit(1)
+      .get();
+
+    if (!phoneSnap.empty) {
+      return res.status(409).json({ error: "Telefone já cadastrado." });
+    }
+
+    // ✅ 4. Criar usuário no Auth
+    const user = await auth.createUser({
+      email: cleanEmail,
+      password
+    });
+
+    // ✅ 5. Salvar no Firestore
+    await db.collection("users").doc(user.uid).set({
+      email: cleanEmail,
+      nome,
+      telefone: cleanPhone,
+      cpf: cpf || "",
+      criadoEm: new Date()
+    });
+
+    res.json({
+      status: "sucesso",
+      uid: user.uid,
+      mensagem: "Usuário criado com sucesso."
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: "Erro no cadastro",
+      details: err.message
+    });
+  }
+});
+
+
 // -------------------------------------------------------------
 // 💸 CRIAR LANÇAMENTO — SEM BLOQUEAR CONTA
 // -------------------------------------------------------------
