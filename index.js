@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// 🚀 Servidor Webhook + Firebase Firestore — VERSÃO COMPLETA FINAL
+// 🚀 API PLANILSON — PADRÃO POR NOME DE CONTA
 // -------------------------------------------------------------
 
 const express = require("express");
@@ -14,7 +14,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
-// 🔥 Firebase Init (Railway Safe)
+// 🔥 Firebase
 // -------------------------------------------------------------
 try {
   const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -30,7 +30,7 @@ try {
 
   console.log("✅ Firebase conectado");
 } catch (err) {
-  console.error("❌ Firebase ERROR:", err.message);
+  console.error("Firebase ERROR:", err.message);
   process.exit(1);
 }
 
@@ -38,113 +38,63 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 🔧 Função - Buscar usuário por email (Auth + Firestore)
+// 🔎 Buscar usuário
 // -------------------------------------------------------------
-async function findUserIdByEmail(email) {
-  const cleanEmail = email.trim().toLowerCase();
-
+async function getUserId(email) {
+  const clean = email.trim().toLowerCase();
   try {
-    const user = await auth.getUserByEmail(cleanEmail);
+    const user = await auth.getUserByEmail(clean);
     return user.uid;
-  } catch (_) {
+  } catch {
     const snap = await db.collection("users")
-      .where("email", "==", cleanEmail)
-      .limit(1)
-      .get();
+      .where("email", "==", clean).limit(1).get();
 
-    if (snap.empty) {
-      throw new Error("Usuário não encontrado");
-    }
-
+    if (snap.empty) throw new Error("Usuário não encontrado");
     return snap.docs[0].id;
   }
 }
 
 // -------------------------------------------------------------
-// 🔧 Função - Similaridade simples de nome de conta (JS puro)
-// -------------------------------------------------------------
-function findContaSimilar(contas, textoBusca) {
-  const busca = textoBusca.toLowerCase();
-
-  let melhor = null;
-  let maiorPontuacao = 0;
-
-  contas.forEach(conta => {
-    const nome = (conta.nome || "").toLowerCase();
-
-    let pontos = 0;
-    for (let letra of busca) {
-      if (nome.includes(letra)) {
-        pontos++;
-      }
-    }
-
-    if (pontos > maiorPontuacao) {
-      maiorPontuacao = pontos;
-      melhor = conta;
-    }
-  });
-
-  return melhor;
-}
-
-// -------------------------------------------------------------
-// ✅ Rota teste
+// ✅ HEALTH
 // -------------------------------------------------------------
 app.get("/", (req, res) => {
   res.json({ status: "ok" });
 });
 
 // -------------------------------------------------------------
-// 👤 CADASTRO - BLOQUEIA EMAIL E TELEFONE REPETIDOS
+// 👤 CADASTRO DE USUÁRIO
 // -------------------------------------------------------------
 app.post("/cadastro", async (req, res) => {
   try {
     const { email, password, nome, telefone, cpf } = req.body;
-
     if (!email || !password || !nome || !telefone) {
       return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = telefone.trim();
-
-    // 🔒 Verificar telefone duplicado
-    const telSnap = await db.collection("users")
-      .where("telefone", "==", cleanPhone)
-      .limit(1)
-      .get();
-
-    if (!telSnap.empty) {
-      return res.status(409).json({ error: "Telefone já cadastrado" });
-    }
+    const clean = email.toLowerCase().trim();
 
     let user;
-
     try {
-      user = await auth.createUser({
-        email: cleanEmail,
-        password
-      });
+      user = await auth.createUser({ email: clean, password });
     } catch (err) {
       if (err.code === "auth/email-already-exists") {
-        return res.status(409).json({ error: "Email já cadastrado" });
-      }
-      throw err;
+        return res.status(400).json({ error: "Email já cadastrado" });
+      } else throw err;
+    }
+
+    // Bloqueio telefone duplicado
+    const telSnap = await db.collection("users")
+      .where("telefone", "==", telefone).limit(1).get();
+
+    if (!telSnap.empty) {
+      return res.status(400).json({ error: "Telefone já cadastrado" });
     }
 
     await db.collection("users").doc(user.uid).set({
-      email: cleanEmail,
-      nome,
-      telefone: cleanPhone,
-      cpf,
-      criadoEm: new Date()
+      email: clean, nome, telefone, cpf, criadoEm: new Date()
     });
 
-    res.json({
-      status: "sucesso",
-      uid: user.uid
-    });
+    res.json({ status: "sucesso", uid: user.uid });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -152,15 +102,61 @@ app.post("/cadastro", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 💸 LANÇAMENTO — COM contaId OU contaNome (similaridade)
+// 🏦 CRIAR CONTA (NOME NORMAL)
+// -------------------------------------------------------------
+app.post("/conta", async (req, res) => {
+  try {
+    const {
+      email,
+      tipo,        // caixinha | corrente | cartao
+      nome,        // Ex: Nubank
+      saldo = 0,
+
+      // Só para cartão:
+      limite = 0,
+      fechamento = null,
+      vencimento = null
+    } = req.body;
+
+    if (!email || !tipo || !nome) {
+      return res.status(400).json({ error: "Campos obrigatórios faltando" });
+    }
+
+    const uid = await getUserId(email);
+
+    const data = {
+      tipo,
+      nome: nome.trim(),
+      saldo: Number(saldo),
+      criadoEm: new Date()
+    };
+
+    if (tipo === "cartao") {
+      data.limite = Number(limite);
+      data.fechamento = fechamento;
+      data.vencimento = vencimento;
+    }
+
+    await db.collection("users").doc(uid)
+      .collection("accounts")
+      .add(data);
+
+    res.json({ status: "sucesso" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 💸 LANÇAMENTO (PROCURA CONTA PELO NOME)
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
   try {
     const {
       email,
       tipo,
-      contaId,
-      contaNome,
+      contaNome,         // << AGORA É NOME, NÃO ID
       categoriaId,
       subcategoria = "",
       descricao = "",
@@ -169,142 +165,69 @@ app.post("/lancamento", async (req, res) => {
       installments = 1
     } = req.body;
 
-    if (!email || !valor || !data) {
-      return res.status(400).json({ error: "Campos mínimos faltando" });
+    if (!email || !contaNome || !valor || !data) {
+      return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    const userId = await findUserIdByEmail(email);
+    const uid = await getUserId(email);
 
-    let contaIdFinal = "SEM_CONTA";
+    // 🔍 Busca conta pelo NOME
+    const accSnap = await db.collection("users")
+      .doc(uid)
+      .collection("accounts")
+      .where("nome", "==", contaNome.trim())
+      .limit(1)
+      .get();
 
-    // 1) Se veio contaId, usa direto
-    if (contaId) {
-      contaIdFinal = contaId;
+    if (accSnap.empty) {
+      return res.status(404).json({ error: "Conta não encontrada pelo nome" });
     }
 
-    // 2) Se veio contaNome, busca parecido
-    if (!contaId && contaNome) {
-      const snap = await db.collection("users")
-        .doc(userId)
-        .collection("accounts")
-        .get();
-
-      const contas = snap.docs.map(d => ({
-        id: d.id,
-        nome: d.data().name || d.data().nome || ""
-      }));
-
-      const conta = findContaSimilar(contas, contaNome);
-      if (conta) {
-        contaIdFinal = conta.id;
-      }
-    }
-
-    const ref = db.collection("users")
-      .doc(userId)
-      .collection("transactions");
-
-    const n = Number(installments);
+    const accId = accSnap.docs[0].id;
 
     const base = {
       tipo,
-      contaId: contaIdFinal,
-      contaNomeDigitado: contaNome || "",
+      contaNome,
+      contaId: accId,
       categoriaId,
       subcategoria,
       descricao,
       valor: Number(valor),
       data,
       criadoEm: new Date(),
-      installments: n
+      installments: Number(installments)
     };
 
-    // ➕ SE NÃO FOR PARCELADO
+    const ref = db.collection("users")
+      .doc(uid).collection("transactions");
+
+    const n = Number(installments);
+
     if (n <= 1) {
       await ref.add(base);
-      return res.json({ status: "sucesso", mensagem: "Lançamento criado" });
+      return res.json({ status: "sucesso" });
     }
 
-    // ➕ SE FOR PARCELADO
-    const valorParcela = base.valor / n;
+    const v = base.valor / n;
     const batch = db.batch();
 
     for (let i = 0; i < n; i++) {
       const d = new Date(data);
       d.setMonth(d.getMonth() + i);
 
-      const item = {
+      const docRef = ref.doc();
+      batch.set(docRef, {
         ...base,
-        valor: valorParcela,
+        valor: v,
         descricao: `${descricao} (${i + 1}/${n})`,
         data: d.toISOString().split("T")[0],
         isInstallment: true
-      };
-
-      const docRef = ref.doc();
-      batch.set(docRef, item);
+      });
     }
 
     await batch.commit();
 
-    res.json({
-      status: "sucesso",
-      mensagem: `${n} parcelas criadas`
-    });
-
-  } catch (err) {
-    res.status(500).json({
-      error: "Erro no lançamento",
-      details: err.message
-    });
-  }
-});
-
-// -------------------------------------------------------------
-// 📂 LISTAR CONTAS
-// -------------------------------------------------------------
-app.get("/contas", async (req, res) => {
-  try {
-    const { email } = req.query;
-    const userId = await findUserIdByEmail(email);
-
-    const snap = await db.collection("users")
-      .doc(userId)
-      .collection("accounts")
-      .get();
-
-    const contas = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
-
-    res.json({ status: "sucesso", contas });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// -------------------------------------------------------------
-// 📊 LISTAR TRANSAÇÕES
-// -------------------------------------------------------------
-app.get("/transacoes", async (req, res) => {
-  try {
-    const { email } = req.query;
-    const userId = await findUserIdByEmail(email);
-
-    const snap = await db.collection("users")
-      .doc(userId)
-      .collection("transactions")
-      .orderBy("criadoEm", "desc")
-      .get();
-
-    const list = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data()
-    }));
-
-    res.json({ status: "sucesso", list });
+    res.json({ status: "sucesso", parcelas: n });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
