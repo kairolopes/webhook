@@ -38,21 +38,21 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
-// 🔎 Buscar usuário
+// 🔎 Buscar usuário — SOMENTE SE EXISTIR NO AUTH
 // -------------------------------------------------------------
 async function getUserId(email) {
   const clean = email.trim().toLowerCase();
+
   try {
     const user = await auth.getUserByEmail(clean);
-    return user.uid;
-  } catch {
-    const snap = await db.collection("users")
-      .where("email", "==", clean).limit(1).get();
-
-    if (snap.empty) throw new Error("Usuário não encontrado");
-    return snap.docs[0].id;
+    return user.uid; // Só aceita se tiver cadastro no Authentication
+  } catch (err) {
+    throw new Error(
+      "Este e-mail não está cadastrado na plataforma. Faça login/cadastro primeiro."
+    );
   }
 }
+
 
 // -------------------------------------------------------------
 // ✅ HEALTH
