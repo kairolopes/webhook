@@ -149,85 +149,94 @@ app.post("/conta", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 💸 LANÇAMENTO (PROCURA CONTA PELO NOME)
+// 💸 LANÇAMENTO (MESMO PADRÃO DO FRONT-END)
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
   try {
     const {
       email,
-      tipo,
-      contaNome,         // << AGORA É NOME, NÃO ID
+      tipo,             // "expense" | "income"
+      meio,             // "credito" | "debito" | "dinheiro"
+      cartao,           // ex: "Neon"
       categoriaId,
-      subcategoria = "",
+      subcategoriaId,
       descricao = "",
       valor,
       data,
-      installments = 1
+      parcelas,         // preferencial
+      installments      // opcional: alias para parcelas
     } = req.body;
 
-    if (!email || !contaNome || !valor || !data) {
+    // Validação básica
+    if (!email || !tipo || !meio || !cartao || !categoriaId || !valor || !data) {
       return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    const uid = await getUserId(email);
+    const uid = await getUserId(email); // garante que o e-mail existe no Auth
 
-    // 🔍 Busca conta pelo NOME
-    const accSnap = await db.collection("users")
-      .doc(uid)
-      .collection("accounts")
-      .where("nome", "==", contaNome.trim())
-      .limit(1)
-      .get();
+    const nParcelas = Number(parcelas || installments || 1);
+    const totalValor = Number(valor);
 
-    if (accSnap.empty) {
-      return res.status(404).json({ error: "Conta não encontrada pelo nome" });
+    if (isNaN(totalValor) || totalValor <= 0) {
+      return res.status(400).json({ error: "Valor inválido" });
     }
 
-    const accId = accSnap.docs[0].id;
+    if (isNaN(nParcelas) || nParcelas < 1) {
+      return res.status(400).json({ error: "Número de parcelas inválido" });
+    }
 
-    const base = {
-      tipo,
-      contaNome,
-      contaId: accId,
-      categoriaId,
-      subcategoria,
-      descricao,
-      valor: Number(valor),
-      data,
-      criadoEm: new Date(),
-      installments: Number(installments)
-    };
+    const ref = db.collection("users").doc(uid).collection("transactions");
 
-    const ref = db.collection("users")
-      .doc(uid).collection("transactions");
+    // Mesmo padrão do front: grupoParcelas só faz sentido quando é parcelado
+    const grupoParcelas = nParcelas > 1 ? `PARC-${Date.now()}` : "";
 
-    const n = Number(installments);
+    // 👉 Lançamento à vista (1 parcela)
+    if (nParcelas === 1) {
+      await ref.add({
+        cartao,
+        categoriaId,
+        subcategoriaId,
+        data,
+        descricao,
+        grupoParcelas,
+        meio,
+        numeroParcela: 1,
+        parcelado: "nao",
+        parcelas: 1,
+        tipo,
+        valor: totalValor
+      });
 
-    if (n <= 1) {
-      await ref.add(base);
       return res.json({ status: "sucesso" });
     }
 
-    const v = base.valor / n;
+    // 👉 Lançamento parcelado (2+ parcelas)
+    const valorParcela = totalValor / nParcelas;
     const batch = db.batch();
 
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < nParcelas; i++) {
       const d = new Date(data);
-      d.setMonth(d.getMonth() + i);
+      d.setMonth(d.getMonth() + i); // mês seguinte para cada parcela
 
       const docRef = ref.doc();
       batch.set(docRef, {
-        ...base,
-        valor: v,
-        descricao: `${descricao} (${i + 1}/${n})`,
+        cartao,
+        categoriaId,
+        subcategoriaId,
         data: d.toISOString().split("T")[0],
-        isInstallment: true
+        descricao: `${descricao} (parc. ${i + 1}/${nParcelas})`,
+        grupoParcelas,
+        meio,
+        numeroParcela: i + 1,
+        parcelado: "sim",
+        parcelas: nParcelas,
+        tipo,
+        valor: valorParcela
       });
     }
 
     await batch.commit();
-
-    res.json({ status: "sucesso", parcelas: n });
+    res.json({ status: "sucesso", parcelas: nParcelas });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
