@@ -327,49 +327,55 @@ app.post("/consulta", async (req, res) => {
     // ---------------------------------------------------------
     // 1) Quanto gastei em um período? (ex: essa semana)
     // ---------------------------------------------------------
-    if (acao === "gasto_periodo") {
-      const { inicio, fim, meio = "todos" } = req.body;
+ if (acao === "gasto_periodo") {
+  const { inicio, fim, meio = "todos" } = req.body;
 
-      if (!inicio || !fim) {
-        return res.status(400).json({
-          error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD)."
-        });
-      }
+  if (!inicio || !fim) {
+    return res.status(400).json({
+      error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD)."
+    });
+  }
 
-      let query = db
-        .collection("users")
-        .doc(uid)
-        .collection("transactions")
-        .where("data", ">=", inicio)
-        .where("data", "<=", fim);
+  // 🔹 garante que não tem espaço nem lixo
+  const inicioLimpo = inicio.toString().trim();
+  const fimLimpo = fim.toString().trim();
 
-      if (meio !== "todos") {
-        query = query.where("meio", "==", meio);
-      }
+  let query = db
+    .collection("users")
+    .doc(uid)
+    .collection("transactions")
+    .where("data", ">=", inicioLimpo)
+    .where("data", "<=", fimLimpo);
 
-      const snap = await query.get();
+  if (meio !== "todos") {
+    query = query.where("meio", "==", meio);
+  }
 
-      let totalGasto = 0;
-      let qtd = 0;
+  const snap = await query.get();
 
-      snap.forEach((doc) => {
-        const dados = doc.data();
-        if (dados.tipo !== "expense") return; // só despesas
-        const v = Number(dados.valor) || 0;
-        totalGasto += v;
-        qtd += 1;
-      });
+  console.log("🔍 Docs encontrados:", snap.size);
 
-      return res.json({
-        status: "sucesso",
-        acao: "gasto_periodo",
-        inicio,
-        fim,
-        meio,
-        totalGasto,
-        quantidadeLancamentos: qtd,
-      });
-    }
+  let totalGasto = 0;
+  let qtd = 0;
+
+  snap.forEach((doc) => {
+    const dados = doc.data();
+    if (dados.tipo !== "expense") return;
+    const v = Number(dados.valor) || 0;
+    totalGasto += v;
+    qtd += 1;
+  });
+
+  return res.json({
+    status: "sucesso",
+    acao: "gasto_periodo",
+    inicio: inicioLimpo,
+    fim: fimLimpo,
+    meio,
+    totalGasto,
+    quantidadeLancamentos: qtd,
+  });
+}
 
     // ---------------------------------------------------------
     // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
