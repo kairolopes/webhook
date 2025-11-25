@@ -45,7 +45,6 @@ function normalizarTelefone(telefone) {
   return telefone.toString().replace(/\D/g, ""); // só dígitos
 }
 
-
 // -------------------------------------------------------------
 // 🔎 Buscar usuário — SOMENTE SE EXISTIR NO AUTH
 // -------------------------------------------------------------
@@ -62,6 +61,47 @@ async function getUserId(email) {
   }
 }
 
+// -------------------------------------------------------------
+// 🔢 Função reutilizável — cálculo de gasto em um período
+// -------------------------------------------------------------
+async function calcularGastoPeriodo(uid, inicio, fim, meio = "todos") {
+  const inicioLimpo = inicio.toString().trim();
+  const fimLimpo = fim.toString().trim();
+
+  let query = db
+    .collection("users")
+    .doc(uid)
+    .collection("transactions")
+    .where("data", ">=", inicioLimpo)
+    .where("data", "<=", fimLimpo);
+
+  if (meio !== "todos") {
+    query = query.where("meio", "==", meio);
+  }
+
+  const snap = await query.get();
+  console.log("🔍 Docs encontrados (gasto_periodo):", snap.size);
+
+  let totalGasto = 0;
+  let qtd = 0;
+
+  snap.forEach((doc) => {
+    const dados = doc.data();
+    if (dados.tipo !== "expense") return;
+    const v = Number(dados.valor) || 0;
+    totalGasto += v;
+    qtd += 1;
+  });
+
+  return {
+    inicio: inicioLimpo,
+    fim: fimLimpo,
+    meio,
+    totalGasto,
+    quantidadeLancamentos: qtd,
+  };
+}
+
 // ---------------------------------------------------------
 // 🔍 GET - Gasto em um período (via EMAIL)
 // Exemplo:
@@ -71,63 +111,28 @@ app.get("/gasto-periodo", async (req, res) => {
   try {
     const { email, inicio, fim, meio = "todos" } = req.query;
 
-    // validações básicas
     if (!email || !inicio || !fim) {
       return res.status(400).json({
-        error: "Informe 'email', 'inicio' e 'fim' na URL (?email=...&inicio=YYYY-MM-DD&fim=YYYY-MM-DD)."
+        error:
+          "Informe 'email', 'inicio' e 'fim' na URL (?email=...&inicio=YYYY-MM-DD&fim=YYYY-MM-DD).",
       });
     }
 
-    // garante mesmo padrão do cadastro/login
     const cleanEmail = email.toString().trim().toLowerCase();
-
-    // reaproveita o getUserId que você já tem
     const uid = await getUserId(cleanEmail);
 
-    const inicioLimpo = inicio.toString().trim();
-    const fimLimpo = fim.toString().trim();
-
-    let query = db
-      .collection("users")
-      .doc(uid)
-      .collection("transactions")
-      .where("data", ">=", inicioLimpo)
-      .where("data", "<=", fimLimpo);
-
-    if (meio !== "todos") {
-      query = query.where("meio", "==", meio);
-    }
-
-    const snap = await query.get();
-    console.log("🔍 [GET /gasto-periodo] Docs encontrados:", snap.size);
-
-    let totalGasto = 0;
-    let qtd = 0;
-
-    snap.forEach((doc) => {
-      const dados = doc.data();
-      if (dados.tipo !== "expense") return;
-      const v = Number(dados.valor) || 0;
-      totalGasto += v;
-      qtd += 1;
-    });
+    const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
     return res.json({
       status: "sucesso",
       acao: "gasto_periodo",
-      inicio: inicioLimpo,
-      fim: fimLimpo,
-      meio,
-      totalGasto,
-      quantidadeLancamentos: qtd
+      ...resultado,
     });
-
   } catch (err) {
     console.error("Erro em GET /gasto-periodo:", err);
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 // -------------------------------------------------------------
 // ✅ HEALTH
@@ -158,9 +163,12 @@ app.post("/cadastro", async (req, res) => {
       } else throw err;
     }
 
-    // Bloqueio telefone duplicado (já usando o telefone normalizado)
-    const telSnap = await db.collection("users")
-      .where("telefone", "==", telNormalizado).limit(1).get();
+    // Bloqueio telefone duplicado
+    const telSnap = await db
+      .collection("users")
+      .where("telefone", "==", telNormalizado)
+      .limit(1)
+      .get();
 
     if (!telSnap.empty) {
       return res.status(400).json({ error: "Telefone já cadastrado" });
@@ -169,13 +177,12 @@ app.post("/cadastro", async (req, res) => {
     await db.collection("users").doc(user.uid).set({
       email: clean,
       nome,
-      telefone: telNormalizado,   // 👈 salva só os dígitos
+      telefone: telNormalizado,
       cpf,
-      criadoEm: new Date()
+      criadoEm: new Date(),
     });
 
     res.json({ status: "sucesso", uid: user.uid });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -188,14 +195,14 @@ app.post("/conta", async (req, res) => {
   try {
     const {
       email,
-      tipo,        // caixinha | corrente | cartao
-      nome,        // Ex: Nubank
+      tipo, // caixinha | corrente | cartao
+      nome, // Ex: Nubank
       saldo = 0,
 
       // Só para cartão:
       limite = 0,
       fechamento = null,
-      vencimento = null
+      vencimento = null,
     } = req.body;
 
     if (!email || !tipo || !nome) {
@@ -208,7 +215,7 @@ app.post("/conta", async (req, res) => {
       tipo,
       nome: nome.trim(),
       saldo: Number(saldo),
-      criadoEm: new Date()
+      criadoEm: new Date(),
     };
 
     if (tipo === "cartao") {
@@ -217,12 +224,13 @@ app.post("/conta", async (req, res) => {
       data.vencimento = vencimento;
     }
 
-    await db.collection("users").doc(uid)
+    await db
+      .collection("users")
+      .doc(uid)
       .collection("accounts")
       .add(data);
 
     res.json({ status: "sucesso" });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -235,24 +243,23 @@ app.post("/lancamento", async (req, res) => {
   try {
     const {
       email,
-      tipo,             // "expense" | "income"
-      meio,             // "credito" | "debito" | "dinheiro"
-      cartao,           // ex: "Neon"
+      tipo, // "expense" | "income"
+      meio, // "credito" | "debito" | "dinheiro"
+      cartao, // ex: "Neon"
       categoriaId,
       subcategoriaId,
       descricao = "",
       valor,
       data,
-      parcelas,         // preferencial
-      installments      // opcional: alias para parcelas
+      parcelas, // preferencial
+      installments, // opcional: alias para parcelas
     } = req.body;
 
-    // Validação básica
     if (!email || !tipo || !meio || !cartao || !categoriaId || !valor || !data) {
       return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    const uid = await getUserId(email); // garante que o e-mail existe no Auth
+    const uid = await getUserId(email);
 
     const nParcelas = Number(parcelas || installments || 1);
     const totalValor = Number(valor);
@@ -266,11 +273,9 @@ app.post("/lancamento", async (req, res) => {
     }
 
     const ref = db.collection("users").doc(uid).collection("transactions");
-
-    // Mesmo padrão do front: grupoParcelas só faz sentido quando é parcelado
     const grupoParcelas = nParcelas > 1 ? `PARC-${Date.now()}` : "";
 
-    // 👉 Lançamento à vista (1 parcela)
+    // À vista
     if (nParcelas === 1) {
       await ref.add({
         cartao,
@@ -284,19 +289,19 @@ app.post("/lancamento", async (req, res) => {
         parcelado: "nao",
         parcelas: 1,
         tipo,
-        valor: totalValor
+        valor: totalValor,
       });
 
       return res.json({ status: "sucesso" });
     }
 
-    // 👉 Lançamento parcelado (2+ parcelas)
+    // Parcelado
     const valorParcela = totalValor / nParcelas;
     const batch = db.batch();
 
     for (let i = 0; i < nParcelas; i++) {
       const d = new Date(data);
-      d.setMonth(d.getMonth() + i); // mês seguinte para cada parcela
+      d.setMonth(d.getMonth() + i);
 
       const docRef = ref.doc();
       batch.set(docRef, {
@@ -311,13 +316,12 @@ app.post("/lancamento", async (req, res) => {
         parcelado: "sim",
         parcelas: nParcelas,
         tipo,
-        valor: valorParcela
+        valor: valorParcela,
       });
     }
 
     await batch.commit();
     res.json({ status: "sucesso", parcelas: nParcelas });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -328,31 +332,27 @@ app.post("/lancamento", async (req, res) => {
 // -------------------------------------------------------------
 app.get("/usuario-por-telefone", async (req, res) => {
   try {
-    const { telefone } = req.query; // ex: /usuario-por-telefone?telefone=+5562...
+    const { telefone } = req.query;
 
     if (!telefone) {
       return res.status(400).json({
-        error: "Informe o telefone na query (?telefone=...)"
+        error: "Informe o telefone na query (?telefone=...)",
       });
     }
 
-    // Normaliza o telefone que veio da URL (tira +, (), -, espaço, etc.)
     const telNormalizado = normalizarTelefone(telefone);
 
-    // Procura na coleção users quem tem esse telefone normalizado
     const snap = await db
       .collection("users")
       .where("telefone", "==", telNormalizado)
       .limit(1)
       .get();
 
-if (snap.empty) {
-  return res.status(404).json({
-    error: "Nenhum usuário encontrado com esse telefone"
-  });
-}
-
-
+    if (snap.empty) {
+      return res.status(404).json({
+        error: "Nenhum usuário encontrado com esse telefone",
+      });
+    }
 
     const doc = snap.docs[0];
     const dados = doc.data();
@@ -362,90 +362,51 @@ if (snap.empty) {
       nome: dados.nome || null,
       email: dados.email || null,
       telefone: dados.telefone || telNormalizado,
-      cpf: dados.cpf || null
+      cpf: dados.cpf || null,
     });
-
   } catch (err) {
     console.error("Erro ao buscar usuário por telefone:", err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-
 // -------------------------------------------------------------
-// 🔍 CONSULTAS FINANCEIRAS
+// 🔍 CONSULTAS FINANCEIRAS (POST /consulta — Nicochat)
 // -------------------------------------------------------------
 app.post("/consulta", async (req, res) => {
   try {
-    // 👇 ISSO É SÓ PRA VER O QUE ESTÁ CHEGANDO DO NICOCHAT
     console.log("🔎 Body recebido em /consulta:", req.body);
 
     const { email, acao } = req.body;
 
     if (!email || !acao) {
       return res.status(400).json({
-        error: "Informe 'email' e 'acao' no corpo da requisição."
+        error: "Informe 'email' e 'acao' no corpo da requisição.",
       });
     }
 
-    const uid = await getUserId(email); // garante que o usuário existe
+    const uid = await getUserId(email);
 
-    // ---------------------------------------------------------
-    // 1) Quanto gastei em um período? (ex: essa semana)
-    // ---------------------------------------------------------
- if (acao === "gasto_periodo") {
-  const { inicio, fim, meio = "todos" } = req.body;
+    // 1) Quanto gastei em um período?
+    if (acao === "gasto_periodo") {
+      const { inicio, fim, meio = "todos" } = req.body;
 
-  if (!inicio || !fim) {
-    return res.status(400).json({
-      error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD)."
-    });
-  }
+      if (!inicio || !fim) {
+        return res.status(400).json({
+          error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
+        });
+      }
 
-  // 🔹 garante que não tem espaço nem lixo
-  const inicioLimpo = inicio.toString().trim();
-  const fimLimpo = fim.toString().trim();
+      const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
-  let query = db
-    .collection("users")
-    .doc(uid)
-    .collection("transactions")
-    .where("data", ">=", inicioLimpo)
-    .where("data", "<=", fimLimpo);
+      return res.json({
+        status: "sucesso",
+        acao: "gasto_periodo",
+        ...resultado,
+      });
+    }
 
-  if (meio !== "todos") {
-    query = query.where("meio", "==", meio);
-  }
-
-  const snap = await query.get();
-
-  console.log("🔍 Docs encontrados:", snap.size);
-
-  let totalGasto = 0;
-  let qtd = 0;
-
-  snap.forEach((doc) => {
-    const dados = doc.data();
-    if (dados.tipo !== "expense") return;
-    const v = Number(dados.valor) || 0;
-    totalGasto += v;
-    qtd += 1;
-  });
-
-  return res.json({
-    status: "sucesso",
-    acao: "gasto_periodo",
-    inicio: inicioLimpo,
-    fim: fimLimpo,
-    meio,
-    totalGasto,
-    quantidadeLancamentos: qtd,
-  });
-}
-
-    // ---------------------------------------------------------
     // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
-    // ---------------------------------------------------------
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
 
@@ -474,15 +435,14 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // ---------------------------------------------------------
     // 3) Qual meu limite do cartão X?
-    // ---------------------------------------------------------
     if (acao === "limite_cartao") {
       const { cartao } = req.body;
 
       if (!cartao) {
         return res.status(400).json({
-          error: "Para 'limite_cartao' informe o campo 'cartao' (nome do cartão).",
+          error:
+            "Para 'limite_cartao' informe o campo 'cartao' (nome do cartão).",
         });
       }
 
@@ -513,22 +473,16 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // ---------------------------------------------------------
     // Ação desconhecida
-    // ---------------------------------------------------------
     return res.status(400).json({
       error:
         "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
     });
-
   } catch (err) {
     console.error("Erro em /consulta:", err);
     return res.status(500).json({ error: err.message });
   }
 });
-
-
-
 
 // -------------------------------------------------------------
 // 🚀 START
