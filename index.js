@@ -62,6 +62,92 @@ async function getUserId(email) {
   }
 }
 
+// ---------------------------------------------------------
+// 🔍 GET - Gasto em um período (email OU telefone)
+// Exemplo 1: /gasto-periodo?email=...&inicio=2025-11-20&fim=2025-11-26&meio=todos
+// Exemplo 2: /gasto-periodo?telefone=+5562...&inicio=2025-11-20&fim=2025-11-26
+// ---------------------------------------------------------
+app.get("/gasto-periodo", async (req, res) => {
+  try {
+    const { email, telefone, inicio, fim, meio = "todos" } = req.query;
+
+    if (!inicio || !fim) {
+      return res.status(400).json({
+        error: "Informe 'inicio' e 'fim' na URL (?inicio=YYYY-MM-DD&fim=YYYY-MM-DD)."
+      });
+    }
+
+    if (!email && !telefone) {
+      return res.status(400).json({
+        error: "Informe 'email' OU 'telefone' na URL."
+      });
+    }
+
+    let uid;
+
+    if (email) {
+      // mesmo getUserId que você já tem
+      uid = await getUserId(email.trim().toLowerCase());
+    } else {
+      // busca pelo telefone normalizado (você já tem normalizarTelefone e /usuario-por-telefone)
+      const telNormalizado = normalizarTelefone(telefone);
+      const snap = await db
+        .collection("users")
+        .where("telefone", "==", telNormalizado)
+        .limit(1)
+        .get();
+
+      if (snap.empty) {
+        return res.status(404).json({ error: "Usuário não encontrado para esse telefone." });
+      }
+
+      uid = snap.docs[0].id;
+    }
+
+    const inicioLimpo = inicio.toString().trim();
+    const fimLimpo = fim.toString().trim();
+
+    let query = db
+      .collection("users")
+      .doc(uid)
+      .collection("transactions")
+      .where("data", ">=", inicioLimpo)
+      .where("data", "<=", fimLimpo);
+
+    if (meio !== "todos") {
+      query = query.where("meio", "==", meio);
+    }
+
+    const snap = await query.get();
+    console.log("🔍 [GET /gasto-periodo] Docs encontrados:", snap.size);
+
+    let totalGasto = 0;
+    let qtd = 0;
+
+    snap.forEach((doc) => {
+      const dados = doc.data();
+      if (dados.tipo !== "expense") return;
+      const v = Number(dados.valor) || 0;
+      totalGasto += v;
+      qtd += 1;
+    });
+
+    return res.json({
+      status: "sucesso",
+      acao: "gasto_periodo",
+      inicio: inicioLimpo,
+      fim: fimLimpo,
+      meio,
+      totalGasto,
+      quantidadeLancamentos: qtd
+    });
+
+  } catch (err) {
+    console.error("Erro em GET /gasto-periodo:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 // -------------------------------------------------------------
 // ✅ HEALTH
