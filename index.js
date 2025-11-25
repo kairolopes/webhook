@@ -244,6 +244,50 @@ app.post("/lancamento", async (req, res) => {
 });
 
 // -------------------------------------------------------------
+// 📞 BUSCAR USUÁRIO PELO TELEFONE
+// -------------------------------------------------------------
+app.get("/usuario-por-telefone", async (req, res) => {
+  try {
+    const { telefone } = req.query; // ex: /usuario-por-telefone?telefone=62999999999
+
+    if (!telefone) {
+      return res.status(400).json({
+        error: "Informe o telefone na query (?telefone=...)"
+      });
+    }
+
+    // Procura na coleção users quem tem esse telefone
+    const snap = await db
+      .collection("users")
+      .where("telefone", "==", telefone)
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(404).json({
+        error: "Nenhum usuário encontrado com esse telefone"
+      });
+    }
+
+    const doc = snap.docs[0];
+    const dados = doc.data();
+
+    return res.json({
+      uid: doc.id,
+      nome: dados.nome || null,
+      email: dados.email || null,
+      telefone: dados.telefone || telefone,
+      cpf: dados.cpf || null
+    });
+
+  } catch (err) {
+    console.error("Erro ao buscar usuário por telefone:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// -------------------------------------------------------------
 // 🚀 START
 // -------------------------------------------------------------
 app.listen(PORT, () => {
