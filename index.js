@@ -307,6 +307,184 @@ if (snap.empty) {
 
 
 // -------------------------------------------------------------
+// 🔍 CONSULTAS FINANCEIRAS
+// -------------------------------------------------------------
+// Este endpoint NÃO entende linguagem natural.
+// A IA deve enviar um JSON já estruturado com:
+// {
+//   "email": "...",
+//   "acao": "gasto_periodo" | "saldo_por_meio" | "limite_cartao",
+//   ...outros campos conforme a ação...
+// }
+app.post("/consulta", async (req, res) => {
+  try {
+    const { email, acao } = req.body;
+
+    if (!email || !acao) {
+      return res.status(400).json({
+        error: "Informe 'email' e 'acao' no corpo da requisição."
+      });
+    }
+
+    const uid = await getUserId(email); // garante que o usuário existe
+
+    // ---------------------------------------------------------
+    // 1) Quanto gastei em um período? (ex: essa semana)
+    // acao = "gasto_periodo"
+    // body:
+    // {
+    //   "email": "...",
+    //   "acao": "gasto_periodo",
+    //   "inicio": "2025-11-24",
+    //   "fim": "2025-11-30",
+    //   "meio": "todos" | "dinheiro" | "credito" | "debito"
+    // }
+    // ---------------------------------------------------------
+    if (acao === "gasto_periodo") {
+      const { inicio, fim, meio = "todos" } = req.body;
+
+      if (!inicio || !fim) {
+        return res.status(400).json({
+          error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD)."
+        });
+      }
+
+      let query = db
+        .collection("users")
+        .doc(uid)
+        .collection("transactions")
+        .where("tipo", "==", "expense")
+        .where("data", ">=", inicio)
+        .where("data", "<=", fim);
+
+      if (meio !== "todos") {
+        query = query.where("meio", "==", meio);
+      }
+
+      const snap = await query.get();
+
+      let totalGasto = 0;
+      snap.forEach((doc) => {
+        const dados = doc.data();
+        const v = Number(dados.valor) || 0;
+        totalGasto += v;
+      });
+
+      return res.json({
+        status: "sucesso",
+        acao: "gasto_periodo",
+        inicio,
+        fim,
+        meio,
+        totalGasto,
+        quantidadeLancamentos: snap.size,
+      });
+    }
+
+    // ---------------------------------------------------------
+    // 2) Quanto tenho ainda em dinheiro?
+    // acao = "saldo_por_meio"
+    // body:
+    // {
+    //   "email": "...",
+    //   "acao": "saldo_por_meio",
+    //   "meio": "dinheiro"   // ou "debito", "credito", etc.
+    // }
+    // Saldo = entradas (income) - saídas (expense) daquele "meio".
+    // ---------------------------------------------------------
+    if (acao === "saldo_por_meio") {
+      const { meio = "dinheiro" } = req.body;
+
+      const snap = await db
+        .collection("users")
+        .doc(uid)
+        .collection("transactions")
+        .where("meio", "==", meio)
+        .get();
+
+      let saldo = 0;
+      snap.forEach((doc) => {
+        const dados = doc.data();
+        const v = Number(dados.valor) || 0;
+
+        if (dados.tipo === "income") {
+          saldo += v;
+        } else if (dados.tipo === "expense") {
+          saldo -= v;
+        }
+      });
+
+      return res.json({
+        status: "sucesso",
+        acao: "saldo_por_meio",
+        meio,
+        saldo,
+        quantidadeLancamentos: snap.size,
+      });
+    }
+
+    // ---------------------------------------------------------
+    // 3) Qual meu limite do cartão X?
+    // acao = "limite_cartao"
+    // body:
+    // {
+    //   "email": "...",
+    //   "acao": "limite_cartao",
+    //   "cartao": "Neon"
+    // }
+    // Usa a coleção "accounts" (tipo = "cartao")
+    // ---------------------------------------------------------
+    if (acao === "limite_cartao") {
+      const { cartao } = req.body;
+
+      if (!cartao) {
+        return res.status(400).json({
+          error: "Para 'limite_cartao' informe o campo 'cartao' (nome do cartão).",
+        });
+      }
+
+      const snap = await db
+        .collection("users")
+        .doc(uid)
+        .collection("accounts")
+        .where("tipo", "==", "cartao")
+        .where("nome", "==", cartao.trim())
+        .limit(1)
+        .get();
+
+      if (snap.empty) {
+        return res.status(404).json({
+          error: `Nenhuma conta de cartão encontrada com o nome '${cartao}'.`,
+        });
+      }
+
+      const conta = snap.docs[0].data();
+
+      return res.json({
+        status: "sucesso",
+        acao: "limite_cartao",
+        cartao: conta.nome,
+        limite: Number(conta.limite) || 0,
+        fechamento: conta.fechamento || null,
+        vencimento: conta.vencimento || null,
+      });
+    }
+
+    // ---------------------------------------------------------
+    // Ação desconhecida
+    // ---------------------------------------------------------
+    return res.status(400).json({
+      error: "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
+    });
+
+  } catch (err) {
+    console.error("Erro em /consulta:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// -------------------------------------------------------------
 // 🚀 START
 // -------------------------------------------------------------
 app.listen(PORT, () => {
