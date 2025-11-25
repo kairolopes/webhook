@@ -61,12 +61,12 @@ async function getUserId(email) {
   }
 }
 
-// -------------------------------------------------------------
-// 🔢 Função reutilizável — cálculo de gasto em um período
-// -------------------------------------------------------------
-async function calcularGastoPeriodo(uid, inicio, fim, meio = "todos") {
+// 🔢 Função reutilizável — cálculo de gasto em um período (com debug)
+async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
   const inicioLimpo = inicio.toString().trim();
   const fimLimpo = fim.toString().trim();
+
+  const meio = (meioRaw || "").toString().trim().toLowerCase();
 
   let query = db
     .collection("users")
@@ -75,19 +75,27 @@ async function calcularGastoPeriodo(uid, inicio, fim, meio = "todos") {
     .where("data", ">=", inicioLimpo)
     .where("data", "<=", fimLimpo);
 
-  if (meio !== "todos") {
+  if (meio && meio !== "todos") {
     query = query.where("meio", "==", meio);
   }
 
   const snap = await query.get();
-  console.log("🔍 Docs encontrados (gasto_periodo):", snap.size);
+
+  // 👉 TOTAL DE DOCUMENTOS QUE O FIRESTORE ACHOU NO PERÍODO
+  const docsEncontrados = snap.size;
 
   let totalGasto = 0;
   let qtd = 0;
 
   snap.forEach((doc) => {
     const dados = doc.data();
+
+    // Log extra pra você ver nos Deploy Logs
+    console.log("🔎 DOC NO PERÍODO:", doc.id, dados);
+
+    // Só conta se for despesa (expense)
     if (dados.tipo !== "expense") return;
+
     const v = Number(dados.valor) || 0;
     totalGasto += v;
     qtd += 1;
@@ -96,9 +104,10 @@ async function calcularGastoPeriodo(uid, inicio, fim, meio = "todos") {
   return {
     inicio: inicioLimpo,
     fim: fimLimpo,
-    meio,
-    totalGasto,
-    quantidadeLancamentos: qtd,
+    meio: meio || "todos",
+    docsEncontrados,          // 👈 todos os docs no período (independente do tipo)
+    totalGasto,               // 👈 soma só das despesas
+    quantidadeLancamentos: qtd // 👈 qtos docs eram "expense"
   };
 }
 
@@ -107,9 +116,11 @@ async function calcularGastoPeriodo(uid, inicio, fim, meio = "todos") {
 // Exemplo:
 //   GET /gasto-periodo?email=usuario@teste.com&inicio=2025-11-20&fim=2025-11-26&meio=todos
 // ---------------------------------------------------------
+
 app.get("/gasto-periodo", async (req, res) => {
   try {
-    const { email, inicio, fim, meio = "todos" } = req.query;
+    const { email, inicio, fim } = req.query;
+    const meio = req.query.meio; // pode vir vazio ou nem vir
 
     if (!email || !inicio || !fim) {
       return res.status(400).json({
@@ -133,6 +144,8 @@ app.get("/gasto-periodo", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
 
 // -------------------------------------------------------------
 // ✅ HEALTH
