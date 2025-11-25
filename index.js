@@ -309,10 +309,9 @@ if (snap.empty) {
 // -------------------------------------------------------------
 // 🔍 CONSULTAS FINANCEIRAS
 // -------------------------------------------------------------
-
-
 app.post("/consulta", async (req, res) => {
   try {
+    // 👇 ISSO É SÓ PRA VER O QUE ESTÁ CHEGANDO DO NICOCHAT
     console.log("🔎 Body recebido em /consulta:", req.body);
 
     const { email, acao } = req.body;
@@ -325,7 +324,9 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email); // garante que o usuário existe
 
-    // 1) GASTO PERÍODO
+    // ---------------------------------------------------------
+    // 1) Quanto gastei em um período? (ex: essa semana)
+    // ---------------------------------------------------------
     if (acao === "gasto_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
@@ -353,7 +354,7 @@ app.post("/consulta", async (req, res) => {
 
       snap.forEach((doc) => {
         const dados = doc.data();
-        if (dados.tipo !== "expense") return;
+        if (dados.tipo !== "expense") return; // só despesas
         const v = Number(dados.valor) || 0;
         totalGasto += v;
         qtd += 1;
@@ -370,7 +371,9 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // 2) SALDO POR MEIO
+    // ---------------------------------------------------------
+    // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
+    // ---------------------------------------------------------
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
 
@@ -385,6 +388,7 @@ app.post("/consulta", async (req, res) => {
       snap.forEach((doc) => {
         const dados = doc.data();
         const v = Number(dados.valor) || 0;
+
         if (dados.tipo === "income") saldo += v;
         else if (dados.tipo === "expense") saldo -= v;
       });
@@ -398,7 +402,9 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // 3) LIMITE CARTÃO
+    // ---------------------------------------------------------
+    // 3) Qual meu limite do cartão X?
+    // ---------------------------------------------------------
     if (acao === "limite_cartao") {
       const { cartao } = req.body;
 
@@ -435,8 +441,12 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
+    // ---------------------------------------------------------
+    // Ação desconhecida
+    // ---------------------------------------------------------
     return res.status(400).json({
-      error: "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
+      error:
+        "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
     });
 
   } catch (err) {
