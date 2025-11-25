@@ -349,38 +349,7 @@ app.post("/consulta", async (req, res) => {
         });
       }
 
-      let query = db
-        .collection("users")
-        .doc(uid)
-        .collection("transactions")
-        .where("tipo", "==", "expense")
-        .where("data", ">=", inicio)
-        .where("data", "<=", fim);
-
-      if (meio !== "todos") {
-        query = query.where("meio", "==", meio);
-      }
-
-      const snap = await query.get();
-
-      let totalGasto = 0;
-      snap.forEach((doc) => {
-        const dados = doc.data();
-        const v = Number(dados.valor) || 0;
-        totalGasto += v;
-      });
-
-      return res.json({
-        status: "sucesso",
-        acao: "gasto_periodo",
-        inicio,
-        fim,
-        meio,
-        totalGasto,
-        quantidadeLancamentos: snap.size,
-      });
-    }
-
+      
     // ---------------------------------------------------------
     // 2) Quanto tenho ainda em dinheiro?
     // acao = "saldo_por_meio"
@@ -402,25 +371,44 @@ app.post("/consulta", async (req, res) => {
         .where("meio", "==", meio)
         .get();
 
-      let saldo = 0;
-      snap.forEach((doc) => {
-        const dados = doc.data();
-        const v = Number(dados.valor) || 0;
 
-        if (dados.tipo === "income") {
-          saldo += v;
-        } else if (dados.tipo === "expense") {
-          saldo -= v;
-        }
-      });
+      let query = db
+  .collection("users")
+  .doc(uid)
+  .collection("transactions")
+  .where("data", ">=", inicio)
+  .where("data", "<=", fim);
 
-      return res.json({
-        status: "sucesso",
-        acao: "saldo_por_meio",
-        meio,
-        saldo,
-        quantidadeLancamentos: snap.size,
-      });
+if (meio !== "todos") {
+  query = query.where("meio", "==", meio);
+}
+
+const snap = await query.get();
+
+let totalGasto = 0;
+let qtd = 0;
+
+snap.forEach((doc) => {
+  const dados = doc.data();
+
+  // só considera despesas (expense)
+  if (dados.tipo !== "expense") return;
+
+  const v = Number(dados.valor) || 0;
+  totalGasto += v;
+  qtd += 1;
+});
+
+return res.json({
+  status: "sucesso",
+  acao: "gasto_periodo",
+  inicio,
+  fim,
+  meio,
+  totalGasto,
+  quantidadeLancamentos: qtd,
+});
+
     }
 
     // ---------------------------------------------------------
