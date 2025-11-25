@@ -329,17 +329,7 @@ app.post("/consulta", async (req, res) => {
     const uid = await getUserId(email); // garante que o usuário existe
 
     // ---------------------------------------------------------
-    // 1) Quanto gastei em um período? (ex: essa semana)
-    // acao = "gasto_periodo"
-    // body:
-    // {
-    //   "email": "...",
-    //   "acao": "gasto_periodo",
-    //   "inicio": "2025-11-24",
-    //   "fim": "2025-11-30",
-    //   "meio": "todos" | "dinheiro" | "credito" | "debito"
-    // }
-    // ---------------------------------------------------------
+
     if (acao === "gasto_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
@@ -349,17 +339,46 @@ app.post("/consulta", async (req, res) => {
         });
       }
 
-      
-    // ---------------------------------------------------------
-    // 2) Quanto tenho ainda em dinheiro?
-    // acao = "saldo_por_meio"
-    // body:
-    // {
-    //   "email": "...",
-    //   "acao": "saldo_por_meio",
-    //   "meio": "dinheiro"   // ou "debito", "credito", etc.
-    // }
-    // Saldo = entradas (income) - saídas (expense) daquele "meio".
+      // 🔹 Busca por data; o filtro de "expense" é feito no código
+      let query = db
+        .collection("users")
+        .doc(uid)
+        .collection("transactions")
+        .where("data", ">=", inicio)
+        .where("data", "<=", fim);
+
+      if (meio !== "todos") {
+        query = query.where("meio", "==", meio);
+      }
+
+      const snap = await query.get();
+
+      let totalGasto = 0;
+      let qtd = 0;
+
+      snap.forEach((doc) => {
+        const dados = doc.data();
+
+        // só conta despesas
+        if (dados.tipo !== "expense") return;
+
+        const v = Number(dados.valor) || 0;
+        totalGasto += v;
+        qtd += 1;
+      });
+
+      return res.json({
+        status: "sucesso",
+        acao: "gasto_periodo",
+        inicio,
+        fim,
+        meio,
+        totalGasto,
+        quantidadeLancamentos: qtd,
+      });
+    }
+
+  
     // ---------------------------------------------------------
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
@@ -371,57 +390,27 @@ app.post("/consulta", async (req, res) => {
         .where("meio", "==", meio)
         .get();
 
+      let saldo = 0;
+      snap.forEach((doc) => {
+        const dados = doc.data();
+        const v = Number(dados.valor) || 0;
 
-let query = db
-  .collection("users")
-  .doc(uid)
-  .collection("transactions")
-  .where("data", ">=", inicio)
-  .where("data", "<=", fim);
+        if (dados.tipo === "income") {
+          saldo += v;
+        } else if (dados.tipo === "expense") {
+          saldo -= v;
+        }
+      });
 
-if (meio !== "todos") {
-  query = query.where("meio", "==", meio);
-}
-
-const snap = await query.get();
-
-let totalGasto = 0;
-let qtd = 0;
-
-snap.forEach((doc) => {
-  const dados = doc.data();
-
-  // filtra só despesas aqui no código, não na query
-  if (dados.tipo !== "expense") return;
-
-  const v = Number(dados.valor) || 0;
-  totalGasto += v;
-  qtd += 1;
-});
-
-return res.json({
-  status: "sucesso",
-  acao: "gasto_periodo",
-  inicio,
-  fim,
-  meio,
-  totalGasto,
-  quantidadeLancamentos: qtd,
-});
-
+      return res.json({
+        status: "sucesso",
+        acao: "saldo_por_meio",
+        meio,
+        saldo,
+        quantidadeLancamentos: snap.size,
+      });
     }
 
-    // ---------------------------------------------------------
-    // 3) Qual meu limite do cartão X?
-    // acao = "limite_cartao"
-    // body:
-    // {
-    //   "email": "...",
-    //   "acao": "limite_cartao",
-    //   "cartao": "Neon"
-    // }
-    // Usa a coleção "accounts" (tipo = "cartao")
-    // ---------------------------------------------------------
     if (acao === "limite_cartao") {
       const { cartao } = req.body;
 
@@ -462,7 +451,8 @@ return res.json({
     // Ação desconhecida
     // ---------------------------------------------------------
     return res.status(400).json({
-      error: "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
+      error:
+        "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
     });
 
   } catch (err) {
