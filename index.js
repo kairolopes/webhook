@@ -309,15 +309,12 @@ if (snap.empty) {
 // -------------------------------------------------------------
 // 🔍 CONSULTAS FINANCEIRAS
 // -------------------------------------------------------------
-// Este endpoint NÃO entende linguagem natural.
-// A IA deve enviar um JSON já estruturado com:
-// {
-//   "email": "...",
-//   "acao": "gasto_periodo" | "saldo_por_meio" | "limite_cartao",
-//   ...outros campos conforme a ação...
-// }
+
+
 app.post("/consulta", async (req, res) => {
   try {
+    console.log("🔎 Body recebido em /consulta:", req.body);
+
     const { email, acao } = req.body;
 
     if (!email || !acao) {
@@ -328,8 +325,7 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email); // garante que o usuário existe
 
-    // ---------------------------------------------------------
-
+    // 1) GASTO PERÍODO
     if (acao === "gasto_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
@@ -339,7 +335,6 @@ app.post("/consulta", async (req, res) => {
         });
       }
 
-      // 🔹 Busca por data; o filtro de "expense" é feito no código
       let query = db
         .collection("users")
         .doc(uid)
@@ -358,10 +353,7 @@ app.post("/consulta", async (req, res) => {
 
       snap.forEach((doc) => {
         const dados = doc.data();
-
-        // só conta despesas
         if (dados.tipo !== "expense") return;
-
         const v = Number(dados.valor) || 0;
         totalGasto += v;
         qtd += 1;
@@ -378,8 +370,7 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-  
-    // ---------------------------------------------------------
+    // 2) SALDO POR MEIO
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
 
@@ -394,12 +385,8 @@ app.post("/consulta", async (req, res) => {
       snap.forEach((doc) => {
         const dados = doc.data();
         const v = Number(dados.valor) || 0;
-
-        if (dados.tipo === "income") {
-          saldo += v;
-        } else if (dados.tipo === "expense") {
-          saldo -= v;
-        }
+        if (dados.tipo === "income") saldo += v;
+        else if (dados.tipo === "expense") saldo -= v;
       });
 
       return res.json({
@@ -411,6 +398,7 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
+    // 3) LIMITE CARTÃO
     if (acao === "limite_cartao") {
       const { cartao } = req.body;
 
@@ -447,12 +435,8 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // ---------------------------------------------------------
-    // Ação desconhecida
-    // ---------------------------------------------------------
     return res.status(400).json({
-      error:
-        "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
+      error: "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
     });
 
   } catch (err) {
@@ -461,19 +445,7 @@ app.post("/consulta", async (req, res) => {
   }
 });
 
-app.post("/consulta", async (req, res) => {
-  try {
-    console.log("🔎 Email recebido na consulta:", req.body.email);
 
-    const { email, acao } = req.body;
-    const uid = await getUserId(email);
-
-    // ... resto da lógica da consulta (gasto_periodo, saldo_por_meio, etc.)
-  } catch (err) {
-    console.error("Erro em /consulta:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 
 // -------------------------------------------------------------
