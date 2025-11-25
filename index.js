@@ -372,7 +372,7 @@ app.post("/consulta", async (req, res) => {
         .get();
 
 
-      let query = db
+let query = db
   .collection("users")
   .doc(uid)
   .collection("transactions")
@@ -391,7 +391,7 @@ let qtd = 0;
 snap.forEach((doc) => {
   const dados = doc.data();
 
-  // só considera despesas (expense)
+  // filtra só despesas aqui no código, não na query
   if (dados.tipo !== "expense") return;
 
   const v = Number(dados.valor) || 0;
