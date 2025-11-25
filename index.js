@@ -461,6 +461,20 @@ app.post("/consulta", async (req, res) => {
   }
 });
 
+app.post("/consulta", async (req, res) => {
+  try {
+    console.log("🔎 Email recebido na consulta:", req.body.email);
+
+    const { email, acao } = req.body;
+    const uid = await getUserId(email);
+
+    // ... resto da lógica da consulta (gasto_periodo, saldo_por_meio, etc.)
+  } catch (err) {
+    console.error("Erro em /consulta:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 // -------------------------------------------------------------
 // 🚀 START
