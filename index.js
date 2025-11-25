@@ -38,6 +38,15 @@ const db = admin.firestore();
 const auth = admin.auth();
 
 // -------------------------------------------------------------
+// 📌 Normalizar telefone (remove tudo que não seja número)
+// -------------------------------------------------------------
+function normalizarTelefone(telefone) {
+  if (!telefone) return "";
+  return telefone.toString().replace(/\D/g, ""); // só dígitos
+}
+
+
+// -------------------------------------------------------------
 // 🔎 Buscar usuário — SOMENTE SE EXISTIR NO AUTH
 // -------------------------------------------------------------
 async function getUserId(email) {
@@ -72,6 +81,7 @@ app.post("/cadastro", async (req, res) => {
     }
 
     const clean = email.toLowerCase().trim();
+    const telNormalizado = normalizarTelefone(telefone);
 
     let user;
     try {
@@ -82,16 +92,20 @@ app.post("/cadastro", async (req, res) => {
       } else throw err;
     }
 
-    // Bloqueio telefone duplicado
+    // Bloqueio telefone duplicado (já usando o telefone normalizado)
     const telSnap = await db.collection("users")
-      .where("telefone", "==", telefone).limit(1).get();
+      .where("telefone", "==", telNormalizado).limit(1).get();
 
     if (!telSnap.empty) {
       return res.status(400).json({ error: "Telefone já cadastrado" });
     }
 
     await db.collection("users").doc(user.uid).set({
-      email: clean, nome, telefone, cpf, criadoEm: new Date()
+      email: clean,
+      nome,
+      telefone: telNormalizado,   // 👈 salva só os dígitos
+      cpf,
+      criadoEm: new Date()
     });
 
     res.json({ status: "sucesso", uid: user.uid });
@@ -248,7 +262,7 @@ app.post("/lancamento", async (req, res) => {
 // -------------------------------------------------------------
 app.get("/usuario-por-telefone", async (req, res) => {
   try {
-    const { telefone } = req.query; // ex: /usuario-por-telefone?telefone=62999999999
+    const { telefone } = req.query; // ex: /usuario-por-telefone?telefone=+5562...
 
     if (!telefone) {
       return res.status(400).json({
@@ -256,10 +270,13 @@ app.get("/usuario-por-telefone", async (req, res) => {
       });
     }
 
-    // Procura na coleção users quem tem esse telefone
+    // Normaliza o telefone que veio da URL (tira +, (), -, espaço, etc.)
+    const telNormalizado = normalizarTelefone(telefone);
+
+    // Procura na coleção users quem tem esse telefone normalizado
     const snap = await db
       .collection("users")
-      .where("telefone", "==", telefone)
+      .where("telefone", "==", telNormalizado)
       .limit(1)
       .get();
 
@@ -276,7 +293,7 @@ app.get("/usuario-por-telefone", async (req, res) => {
       uid: doc.id,
       nome: dados.nome || null,
       email: dados.email || null,
-      telefone: dados.telefone || telefone,
+      telefone: dados.telefone || telNormalizado,
       cpf: dados.cpf || null
     });
 
