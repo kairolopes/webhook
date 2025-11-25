@@ -63,46 +63,26 @@ async function getUserId(email) {
 }
 
 // ---------------------------------------------------------
-// 🔍 GET - Gasto em um período (email OU telefone)
-// Exemplo 1: /gasto-periodo?email=...&inicio=2025-11-20&fim=2025-11-26&meio=todos
-// Exemplo 2: /gasto-periodo?telefone=+5562...&inicio=2025-11-20&fim=2025-11-26
+// 🔍 GET - Gasto em um período (via EMAIL)
+// Exemplo:
+//   GET /gasto-periodo?email=usuario@teste.com&inicio=2025-11-20&fim=2025-11-26&meio=todos
 // ---------------------------------------------------------
 app.get("/gasto-periodo", async (req, res) => {
   try {
-    const { email, telefone, inicio, fim, meio = "todos" } = req.query;
+    const { email, inicio, fim, meio = "todos" } = req.query;
 
-    if (!inicio || !fim) {
+    // validações básicas
+    if (!email || !inicio || !fim) {
       return res.status(400).json({
-        error: "Informe 'inicio' e 'fim' na URL (?inicio=YYYY-MM-DD&fim=YYYY-MM-DD)."
+        error: "Informe 'email', 'inicio' e 'fim' na URL (?email=...&inicio=YYYY-MM-DD&fim=YYYY-MM-DD)."
       });
     }
 
-    if (!email && !telefone) {
-      return res.status(400).json({
-        error: "Informe 'email' OU 'telefone' na URL."
-      });
-    }
+    // garante mesmo padrão do cadastro/login
+    const cleanEmail = email.toString().trim().toLowerCase();
 
-    let uid;
-
-    if (email) {
-      // mesmo getUserId que você já tem
-      uid = await getUserId(email.trim().toLowerCase());
-    } else {
-      // busca pelo telefone normalizado (você já tem normalizarTelefone e /usuario-por-telefone)
-      const telNormalizado = normalizarTelefone(telefone);
-      const snap = await db
-        .collection("users")
-        .where("telefone", "==", telNormalizado)
-        .limit(1)
-        .get();
-
-      if (snap.empty) {
-        return res.status(404).json({ error: "Usuário não encontrado para esse telefone." });
-      }
-
-      uid = snap.docs[0].id;
-    }
+    // reaproveita o getUserId que você já tem
+    const uid = await getUserId(cleanEmail);
 
     const inicioLimpo = inicio.toString().trim();
     const fimLimpo = fim.toString().trim();
