@@ -280,13 +280,12 @@ app.get("/usuario-por-telefone", async (req, res) => {
       .limit(1)
       .get();
 
- if (snap.empty) {
+if (snap.empty) {
   return res.status(404).json({
-    error: "Nenhum usuário encontrado com esse telefone",
-    recebido: telefone,
-    normalizado: telNormalizado
+    error: "Nenhum usuário encontrado com esse telefone"
   });
 }
+
 
 
     const doc = snap.docs[0];
