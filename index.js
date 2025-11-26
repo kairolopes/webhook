@@ -412,11 +412,19 @@ app.post("/consulta", async (req, res) => {
 
       const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
-      return res.json({
-        status: "sucesso",
-        acao: "gasto_periodo",
-        ...resultado,
-      });
+ return res.set("Content-Type", "application/json").json({
+  status: "sucesso",
+  acao: "gasto_periodo",
+  data: {
+    inicio: resultado.inicio,
+    fim: resultado.fim,
+    meio: resultado.meio,
+    docsEncontrados: resultado.docsEncontrados,
+    totalGasto: resultado.totalGasto,
+    quantidadeLancamentos: resultado.quantidadeLancamentos
+  }
+});
+
     }
 
     // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
