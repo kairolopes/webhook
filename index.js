@@ -451,15 +451,33 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email);
 
-    // 1) Quanto gastei em um período?
+    // 1) Quanto gastei em um período? (DESPESA)
     if (acao === "gasto_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
       if (!inicio || !fim) {
         return res.status(400).json({
-          error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
+          error:
+            "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
         });
       }
+
+      const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
+
+      return res.set("Content-Type", "application/json").json({
+        status: "sucesso",
+        acao: "gasto_periodo",
+        data: {
+          inicio: resultado.inicio,
+          fim: resultado.fim,
+          meio: resultado.meio,
+          docsEncontrados: resultado.docsEncontrados,
+          totalGasto: resultado.totalGasto,
+          quantidadeLancamentos: resultado.quantidadeLancamentos,
+        },
+      });
+    }
+
     // 1b) Quanto GANHEI em um período? (RECEITA)
     if (acao === "receita_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
@@ -485,23 +503,6 @@ app.post("/consulta", async (req, res) => {
           quantidadeLancamentos: resultado.quantidadeLancamentos,
         },
       });
-    }
-
-      const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
-
- return res.set("Content-Type", "application/json").json({
-  status: "sucesso",
-  acao: "gasto_periodo",
-  data: {
-    inicio: resultado.inicio,
-    fim: resultado.fim,
-    meio: resultado.meio,
-    docsEncontrados: resultado.docsEncontrados,
-    totalGasto: resultado.totalGasto,
-    quantidadeLancamentos: resultado.quantidadeLancamentos
-  }
-});
-
     }
 
     // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
@@ -574,7 +575,7 @@ app.post("/consulta", async (req, res) => {
     // Ação desconhecida
     return res.status(400).json({
       error:
-        "Ação de consulta inválida. Use 'gasto_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
+        "Ação de consulta inválida. Use 'gasto_periodo', 'receita_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
     });
   } catch (err) {
     console.error("Erro em /consulta:", err);
