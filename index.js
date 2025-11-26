@@ -61,6 +61,55 @@ async function getUserId(email) {
   }
 }
 
+// 🔢 Função reutilizável — cálculo de RECEITA em um período
+async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
+  const inicioLimpo = inicio.toString().trim();
+  const fimLimpo = fim.toString().trim();
+
+  const meio = (meioRaw || "").toString().trim().toLowerCase();
+
+  let query = db
+    .collection("users")
+    .doc(uid)
+    .collection("transactions")
+    .where("data", ">=", inicioLimpo)
+    .where("data", "<=", fimLimpo);
+
+  if (meio && meio !== "todos") {
+    query = query.where("meio", "==", meio);
+  }
+
+  const snap = await query.get();
+
+  const docsEncontrados = snap.size;
+
+  let totalReceita = 0;
+  let qtd = 0;
+
+  snap.forEach((doc) => {
+    const dados = doc.data();
+
+    console.log("🔎 DOC NO PERÍODO (RECEITA):", doc.id, dados);
+
+    // Só conta se for receita (income)
+    if (dados.tipo !== "income") return;
+
+    const v = Number(dados.valor) || 0;
+    totalReceita += v;
+    qtd += 1;
+  });
+
+  return {
+    inicio: inicioLimpo,
+    fim: fimLimpo,
+    meio: meio || "todos",
+    docsEncontrados,
+    totalReceita,
+    quantidadeLancamentos: qtd,
+  };
+}
+
+
 // 🔢 Função reutilizável — cálculo de gasto em um período (com debug)
 async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
   const inicioLimpo = inicio.toString().trim();
@@ -411,6 +460,32 @@ app.post("/consulta", async (req, res) => {
           error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
         });
       }
+    // 1b) Quanto GANHEI em um período? (RECEITA)
+    if (acao === "receita_periodo") {
+      const { inicio, fim, meio = "todos" } = req.body;
+
+      if (!inicio || !fim) {
+        return res.status(400).json({
+          error:
+            "Para 'receita_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
+        });
+      }
+
+      const resultado = await calcularReceitaPeriodo(uid, inicio, fim, meio);
+
+      return res.set("Content-Type", "application/json").json({
+        status: "sucesso",
+        acao: "receita_periodo",
+        data: {
+          inicio: resultado.inicio,
+          fim: resultado.fim,
+          meio: resultado.meio,
+          docsEncontrados: resultado.docsEncontrados,
+          totalReceita: resultado.totalReceita,
+          quantidadeLancamentos: resultado.quantidadeLancamentos,
+        },
+      });
+    }
 
       const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
