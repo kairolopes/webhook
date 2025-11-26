@@ -134,11 +134,13 @@ app.get("/gasto-periodo", async (req, res) => {
 
     const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
-    return res.json({
-      status: "sucesso",
-      acao: "gasto_periodo",
-      ...resultado,
-    });
+   return res.json({
+  total_gasto: resultado.totalGasto,
+  quantidade_lancamentos: resultado.quantidadeLancamentos,
+  inicio_formatado: resultado.inicio,
+  fim_formatado: resultado.fim
+});
+
   } catch (err) {
     console.error("Erro em GET /gasto-periodo:", err);
     return res.status(500).json({ error: err.message });
