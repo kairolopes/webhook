@@ -42,7 +42,7 @@ const auth = admin.auth();
 // -------------------------------------------------------------
 function normalizarTelefone(telefone) {
   if (!telefone) return "";
-  return telefone.toString().replace(/\D/g, ""); // só dígitos
+  return telefone.toString().replace(/\D/g, "");
 }
 
 // -------------------------------------------------------------
@@ -53,7 +53,7 @@ async function getUserId(email) {
 
   try {
     const user = await auth.getUserByEmail(clean);
-    return user.uid; // Só aceita se tiver cadastro no Authentication
+    return user.uid;
   } catch (err) {
     throw new Error(
       "Este e-mail não está cadastrado na plataforma. Faça login/cadastro primeiro."
@@ -91,7 +91,6 @@ async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
 
     console.log("🔎 DOC NO PERÍODO (RECEITA):", doc.id, dados);
 
-    // Só conta se for receita (income)
     if (dados.tipo !== "income") return;
 
     const v = Number(dados.valor) || 0;
@@ -108,7 +107,6 @@ async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
     quantidadeLancamentos: qtd,
   };
 }
-
 
 // 🔢 Função reutilizável — cálculo de gasto em um período (com debug)
 async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
@@ -130,7 +128,6 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
 
   const snap = await query.get();
 
-  // 👉 TOTAL DE DOCUMENTOS QUE O FIRESTORE ACHOU NO PERÍODO
   const docsEncontrados = snap.size;
 
   let totalGasto = 0;
@@ -139,10 +136,8 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
   snap.forEach((doc) => {
     const dados = doc.data();
 
-    // Log extra pra você ver nos Deploy Logs
     console.log("🔎 DOC NO PERÍODO:", doc.id, dados);
 
-    // Só conta se for despesa (expense)
     if (dados.tipo !== "expense") return;
 
     const v = Number(dados.valor) || 0;
@@ -154,22 +149,19 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
     inicio: inicioLimpo,
     fim: fimLimpo,
     meio: meio || "todos",
-    docsEncontrados,          // 👈 todos os docs no período (independente do tipo)
-    totalGasto,               // 👈 soma só das despesas
-    quantidadeLancamentos: qtd // 👈 qtos docs eram "expense"
+    docsEncontrados,
+    totalGasto,
+    quantidadeLancamentos: qtd,
   };
 }
 
 // ---------------------------------------------------------
 // 🔍 GET - Gasto em um período (via EMAIL)
-// Exemplo:
-//   GET /gasto-periodo?email=usuario@teste.com&inicio=2025-11-20&fim=2025-11-26&meio=todos
 // ---------------------------------------------------------
-
 app.get("/gasto-periodo", async (req, res) => {
   try {
     const { email, inicio, fim } = req.query;
-    const meio = req.query.meio; // pode vir vazio ou nem vir
+    const meio = req.query.meio;
 
     if (!email || !inicio || !fim) {
       return res.status(400).json({
@@ -183,20 +175,17 @@ app.get("/gasto-periodo", async (req, res) => {
 
     const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
 
-   return res.json({
-  total_gasto: resultado.totalGasto,
-  quantidade_lancamentos: resultado.quantidadeLancamentos,
-  inicio_formatado: resultado.inicio,
-  fim_formatado: resultado.fim
-});
-
+    return res.json({
+      total_gasto: resultado.totalGasto,
+      quantidade_lancamentos: resultado.quantidadeLancamentos,
+      inicio_formatado: resultado.inicio,
+      fim_formatado: resultado.fim,
+    });
   } catch (err) {
     console.error("Erro em GET /gasto-periodo:", err);
     return res.status(500).json({ error: err.message });
   }
 });
-
-
 
 // -------------------------------------------------------------
 // ✅ HEALTH
@@ -227,7 +216,6 @@ app.post("/cadastro", async (req, res) => {
       } else throw err;
     }
 
-    // Bloqueio telefone duplicado
     const telSnap = await db
       .collection("users")
       .where("telefone", "==", telNormalizado)
@@ -263,7 +251,6 @@ app.post("/conta", async (req, res) => {
       nome, // Ex: Nubank
       saldo = 0,
 
-      // Só para cartão:
       limite = 0,
       fechamento = null,
       vencimento = null,
@@ -305,22 +292,49 @@ app.post("/conta", async (req, res) => {
 // -------------------------------------------------------------
 app.post("/lancamento", async (req, res) => {
   try {
+    console.log("💾 [LANÇAMENTO] Body recebido:", req.body);
+
     const {
       email,
       tipo, // "expense" | "income"
-      meio, // "credito" | "debito" | "dinheiro"
-      cartao, // ex: "Neon"
+      meio, // "credito" | "debito" | "dinheiro" | "pix"
+      cartao, // ex: "Neon" (obrigatório só se for crédito)
       categoriaId,
       subcategoriaId,
       descricao = "",
       valor,
-      data,
-      parcelas, // preferencial
-      installments, // opcional: alias para parcelas
+      data, // esperado como "YYYY-MM-DD"
+      parcelas,
+      installments,
     } = req.body;
 
-    if (!email || !tipo || !meio || !cartao || !categoriaId || !valor || !data) {
-      return res.status(400).json({ error: "Campos obrigatórios faltando" });
+    if (!email || !tipo || !meio || !categoriaId || !valor || !data) {
+      console.log("⚠️ [LANÇAMENTO] Campos faltando:", {
+        email,
+        tipo,
+        meio,
+        categoriaId,
+        valor,
+        data,
+      });
+      return res.status(400).json({
+        error:
+          "Campos obrigatórios faltando (email, tipo, meio, categoriaId, valor, data).",
+      });
+    }
+
+    const meioLimpo = meio.toString().trim().toLowerCase();
+
+    // Se for CRÉDITO, precisa do nome do cartão
+    if (meioLimpo === "credito" && !cartao) {
+      console.log(
+        "⚠️ [LANÇAMENTO] Crédito sem cartão informado. Body:",
+        req.body
+      );
+      return res.status(400).json({
+        error:
+          "Para lançamentos no crédito, informe o nome do cartão no campo 'cartao'.",
+      });
     }
 
     const uid = await getUserId(email);
@@ -329,65 +343,98 @@ app.post("/lancamento", async (req, res) => {
     const totalValor = Number(valor);
 
     if (isNaN(totalValor) || totalValor <= 0) {
+      console.log("⚠️ [LANÇAMENTO] Valor inválido:", valor);
       return res.status(400).json({ error: "Valor inválido" });
     }
 
     if (isNaN(nParcelas) || nParcelas < 1) {
+      console.log("⚠️ [LANÇAMENTO] Número de parcelas inválido:", nParcelas);
       return res.status(400).json({ error: "Número de parcelas inválido" });
     }
 
     const ref = db.collection("users").doc(uid).collection("transactions");
     const grupoParcelas = nParcelas > 1 ? `PARC-${Date.now()}` : "";
 
-    // À vista
+    // ------------------------------
+    // À vista (1 parcela)
+    // ------------------------------
     if (nParcelas === 1) {
-      await ref.add({
-        cartao,
+      const docData = {
+        cartao: cartao || null,
         categoriaId,
-        subcategoriaId,
-        data,
+        subcategoriaId: subcategoriaId || null,
+        data, // aqui você está salvando como veio (ex.: "2025-11-25")
         descricao,
         grupoParcelas,
-        meio,
+        meio: meioLimpo,
         numeroParcela: 1,
         parcelado: "nao",
         parcelas: 1,
         tipo,
         valor: totalValor,
-      });
+      };
 
-      return res.json({ status: "sucesso" });
+      const docRef = await ref.add(docData);
+
+      console.log("✅ [LANÇAMENTO] Documento criado (à vista):", docRef.id, docData);
+
+      return res.json({
+        status: "sucesso",
+        tipoLancamento: "avista",
+        docId: docRef.id,
+        dados: docData,
+      });
     }
 
-    // Parcelado
+    // ------------------------------
+    // Parcelado (nParcelas > 1)
+    // ------------------------------
     const valorParcela = totalValor / nParcelas;
     const batch = db.batch();
+    const idsParcelas = [];
 
     for (let i = 0; i < nParcelas; i++) {
       const d = new Date(data);
       d.setMonth(d.getMonth() + i);
 
+      const dataParcela = d.toISOString().split("T")[0];
+
       const docRef = ref.doc();
-      batch.set(docRef, {
-        cartao,
+      const docData = {
+        cartao: cartao || null,
         categoriaId,
-        subcategoriaId,
-        data: d.toISOString().split("T")[0],
+        subcategoriaId: subcategoriaId || null,
+        data: dataParcela,
         descricao: `${descricao} (parc. ${i + 1}/${nParcelas})`,
         grupoParcelas,
-        meio,
+        meio: meioLimpo,
         numeroParcela: i + 1,
         parcelado: "sim",
         parcelas: nParcelas,
         tipo,
         valor: valorParcela,
-      });
+      };
+
+      batch.set(docRef, docData);
+      idsParcelas.push({ id: docRef.id, data: docData });
     }
 
     await batch.commit();
-    res.json({ status: "sucesso", parcelas: nParcelas });
+
+    console.log("✅ [LANÇAMENTO] Parcelas criadas:", idsParcelas);
+
+    return res.json({
+      status: "sucesso",
+      tipoLancamento: "parcelado",
+      parcelasCriadas: nParcelas,
+      documentos: idsParcelas.map((p) => ({
+        id: p.id,
+        data: p.data,
+      })),
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erro em POST /lancamento:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -451,7 +498,6 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email);
 
-    // 1) Quanto gastei em um período? (DESPESA)
     if (acao === "gasto_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
@@ -478,7 +524,6 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // 1b) Quanto GANHEI em um período? (RECEITA)
     if (acao === "receita_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
 
@@ -505,7 +550,6 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // 2) Quanto tenho ainda em dinheiro? (saldo por meio)
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
 
@@ -534,7 +578,6 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // 3) Qual meu limite do cartão X?
     if (acao === "limite_cartao") {
       const { cartao } = req.body;
 
@@ -572,7 +615,6 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    // Ação desconhecida
     return res.status(400).json({
       error:
         "Ação de consulta inválida. Use 'gasto_periodo', 'receita_periodo', 'saldo_por_meio' ou 'limite_cartao'.",
