@@ -46,6 +46,39 @@ function normalizarTelefone(telefone) {
 }
 
 // -------------------------------------------------------------
+// 📅 Normalizar data para 'YYYY-MM-DD'
+// Aceita:
+//  - 'YYYY-MM-DD'  → mantém
+//  - 'DD/MM/YYYY'  → converte
+//  - 'DD-MM-YYYY'  → converte
+// -------------------------------------------------------------
+function normalizarDataYYYYMMDD(dataStr) {
+  if (!dataStr) return "";
+
+  const s = dataStr.toString().trim();
+
+  // Já está no formato correto
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return s;
+  }
+
+  // Formato brasileiro com barra: 08/12/2025
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+    const [dia, mes, ano] = s.split("/");
+    return `${ano}-${mes}-${dia}`; // 2025-12-08
+  }
+
+  // Formato DD-MM-YYYY
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+    const [dia, mes, ano] = s.split("-");
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  // Formato desconhecido: deixa como veio (melhor do que quebrar)
+  return s;
+}
+
+// -------------------------------------------------------------
 // 🔎 Buscar usuário — SOMENTE SE EXISTIR NO AUTH
 // -------------------------------------------------------------
 async function getUserId(email) {
@@ -86,10 +119,10 @@ async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
   let totalReceita = 0;
   let qtd = 0;
 
-  snap.forEach((doc) => {
-    const dados = doc.data();
+  snap.forEach((docSnap) => {
+    const dados = docSnap.data();
 
-    console.log("🔎 DOC NO PERÍODO (RECEITA):", doc.id, dados);
+    console.log("🔎 DOC NO PERÍODO (RECEITA):", docSnap.id, dados);
 
     if (dados.tipo !== "income") return;
 
@@ -133,10 +166,10 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
   let totalGasto = 0;
   let qtd = 0;
 
-  snap.forEach((doc) => {
-    const dados = doc.data();
+  snap.forEach((docSnap) => {
+    const dados = docSnap.data();
 
-    console.log("🔎 DOC NO PERÍODO:", doc.id, dados);
+    console.log("🔎 DOC NO PERÍODO:", docSnap.id, dados);
 
     if (dados.tipo !== "expense") return;
 
@@ -250,7 +283,6 @@ app.post("/conta", async (req, res) => {
       tipo, // caixinha | corrente | cartao
       nome, // Ex: Nubank
       saldo = 0,
-
       limite = 0,
       fechamento = null,
       vencimento = null,
@@ -303,7 +335,7 @@ app.post("/lancamento", async (req, res) => {
       subcategoriaId,
       descricao = "",
       valor,
-      data, // esperado como "YYYY-MM-DD"
+      data, // pode vir "YYYY-MM-DD" ou "DD/MM/YYYY"
       parcelas,
       installments,
     } = req.body;
@@ -324,6 +356,10 @@ app.post("/lancamento", async (req, res) => {
     }
 
     const meioLimpo = meio.toString().trim().toLowerCase();
+
+    // Normaliza a data para YYYY-MM-DD
+    const dataNormalizada = normalizarDataYYYYMMDD(data);
+    console.log("📅 [LANÇAMENTO] Data normalizada:", data, "→", dataNormalizada);
 
     // Se for CRÉDITO, precisa do nome do cartão
     if (meioLimpo === "credito" && !cartao) {
@@ -363,7 +399,7 @@ app.post("/lancamento", async (req, res) => {
         cartao: cartao || null,
         categoriaId,
         subcategoriaId: subcategoriaId || null,
-        data, // aqui você está salvando como veio (ex.: "2025-11-25")
+        data: dataNormalizada, // 👈 SEMPRE YYYY-MM-DD
         descricao,
         grupoParcelas,
         meio: meioLimpo,
@@ -376,7 +412,11 @@ app.post("/lancamento", async (req, res) => {
 
       const docRef = await ref.add(docData);
 
-      console.log("✅ [LANÇAMENTO] Documento criado (à vista):", docRef.id, docData);
+      console.log(
+        "✅ [LANÇAMENTO] Documento criado (à vista):",
+        docRef.id,
+        docData
+      );
 
       return res.json({
         status: "sucesso",
@@ -393,11 +433,14 @@ app.post("/lancamento", async (req, res) => {
     const batch = db.batch();
     const idsParcelas = [];
 
-    for (let i = 0; i < nParcelas; i++) {
-      const d = new Date(data);
-      d.setMonth(d.getMonth() + i);
+    // base para as datas das parcelas
+    const baseDate = new Date(dataNormalizada);
 
-      const dataParcela = d.toISOString().split("T")[0];
+    for (let i = 0; i < nParcelas; i++) {
+      const d = new Date(baseDate);
+      d.setMonth(baseDate.getMonth() + i);
+
+      const dataParcela = d.toISOString().split("T")[0]; // YYYY-MM-DD
 
       const docRef = ref.doc();
       const docData = {
@@ -465,11 +508,11 @@ app.get("/usuario-por-telefone", async (req, res) => {
       });
     }
 
-    const doc = snap.docs[0];
-    const dados = doc.data();
+    const docSnap = snap.docs[0];
+    const dados = docSnap.data();
 
     return res.json({
-      uid: doc.id,
+      uid: docSnap.id,
       nome: dados.nome || null,
       email: dados.email || null,
       telefone: dados.telefone || telNormalizado,
@@ -561,8 +604,8 @@ app.post("/consulta", async (req, res) => {
         .get();
 
       let saldo = 0;
-      snap.forEach((doc) => {
-        const dados = doc.data();
+      snap.forEach((docSnap) => {
+        const dados = docSnap.data();
         const v = Number(dados.valor) || 0;
 
         if (dados.tipo === "income") saldo += v;
