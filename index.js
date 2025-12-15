@@ -164,9 +164,9 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
   snap.forEach((docSnap) => {
     const dados = docSnap.data();
 
+    if (dados.tipo !== "expense") return;
     console.log("🔎 DOC NO PERÍODO (GASTO):", docSnap.id, dados);
 
-    if (dados.tipo !== "expense") return;
 
     const v = Number(dados.valor) || 0;
     totalGasto += v;
