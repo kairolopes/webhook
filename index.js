@@ -256,6 +256,42 @@ app.get("/", (req, res) => {
 });
 
 // -------------------------------------------------------------
+// 📄 MODELOS DE RELATÓRIO (para o front montar os botões)
+// -------------------------------------------------------------
+const MODELOS_RELATORIO = [
+  {
+    id: "mes_completo",
+    titulo: "Relatório completo do mês",
+    descricao: "Resumo + previsão + sugestões + tabela por categorias",
+    handlerFront: "gerarPdfResumoMes",
+  },
+  {
+    id: "categorias_mes",
+    titulo: "Despesas por categoria",
+    descricao: "Tabela de categorias do mês selecionado",
+    handlerFront: "gerarPdfCategoriasMes",
+  },
+  {
+    id: "plano_objetivo",
+    titulo: "Plano de objetivo",
+    descricao: "Plano mensal para atingir um objetivo",
+    handlerFront: "gerarPdfPlanoObjetivo",
+  },
+];
+
+// -------------------------------------------------------------
+// 🔍 GET - Lista de modelos de relatórios
+// -------------------------------------------------------------
+app.get("/relatorios/modelos", (req, res) => {
+  return res.json({
+    status: "sucesso",
+    modelos: MODELOS_RELATORIO,
+  });
+});
+
+
+
+// -------------------------------------------------------------
 // 👤 CADASTRO DE USUÁRIO
 // -------------------------------------------------------------
 app.post("/cadastro", async (req, res) => {
@@ -703,6 +739,179 @@ if (acao === "receita_periodo") {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
+const PDFDocument = require("pdfkit");
+
+app.post("/relatorio/pdf", async (req, res) => {
+  try {
+    // =============================
+    // 1) ENTRADAS
+    // =============================
+    const { uid, mes, email } = req.body || {};
+    // mes no formato "YYYY-MM" (ex: "2025-11")
+
+    console.log("📥 /relatorio/pdf body:", req.body);
+
+    if (!uid) {
+      return res.status(400).json({ ok: false, error: "Faltou uid" });
+    }
+    if (!mes || !/^\d{4}-\d{2}$/.test(String(mes))) {
+      return res.status(400).json({ ok: false, error: "Faltou mes no formato YYYY-MM (ex: 2025-11)" });
+    }
+
+    // =============================
+    // 2) BUSCAR TRANSAÇÕES DO USUÁRIO
+    // =============================
+    // Caminho: users/{uid}/transactions
+    const colRef = admin.firestore().collection(`users/${uid}/transactions`);
+    const snap = await colRef.get();
+
+    console.log("📦 Total docs encontrados:", snap.size);
+
+    // =============================
+    // 3) FILTRAR SÓ O MÊS PEDIDO
+    // =============================
+    const itensMes = [];
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    snap.forEach((doc) => {
+      const d = doc.data() || {};
+      const data = String(d.data || ""); // "YYYY-MM-DD"
+      if (!data.startsWith(mes)) return;
+
+      const tipo = String(d.tipo || "").toLowerCase(); // income | expense
+      const valor = Number(d.valor || 0);
+
+      const item = {
+        data,
+        tipo,
+        categoriaId: d.categoriaId || "",
+        subcategoriaId: d.subcategoriaId || "",
+        descricao: d.descricao || "",
+        valor,
+      };
+
+      itensMes.push(item);
+
+      if (tipo === "income") totalIncome += valor;
+      if (tipo === "expense") totalExpense += valor;
+    });
+
+    // Ordena por data (mais recente primeiro)
+    itensMes.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+
+    console.log("📅 Itens do mês:", itensMes.length);
+    console.log("💰 Totais:", { totalIncome, totalExpense, saldo: totalIncome - totalExpense });
+
+    // =============================
+    // 4) GERAR PDF (EM MEMÓRIA)
+    // =============================
+    const docPdf = new PDFDocument({ size: "A4", margin: 40 });
+    const chunks = [];
+
+    docPdf.on("data", (c) => chunks.push(c));
+
+    const pdfBuffer = await new Promise((resolve, reject) => {
+      docPdf.on("end", () => resolve(Buffer.concat(chunks)));
+      docPdf.on("error", reject);
+
+      // Cabeçalho
+      docPdf.fontSize(18).text("Planilson Financeiro", { align: "left" });
+      docPdf.moveDown(0.2);
+      docPdf.fontSize(12).text(`Relatório mensal: ${mes}`, { align: "left" });
+      if (email) docPdf.fontSize(10).fillColor("gray").text(`Usuário: ${email}`);
+      docPdf.fillColor("black");
+      docPdf.moveDown(1);
+
+      // Resumo
+      docPdf.fontSize(12).text(`Receitas: R$ ${totalIncome.toFixed(2)}`);
+      docPdf.text(`Despesas: R$ ${totalExpense.toFixed(2)}`);
+      docPdf.text(`Saldo: R$ ${(totalIncome - totalExpense).toFixed(2)}`);
+      docPdf.moveDown(1);
+
+      // Linha
+      docPdf.moveTo(40, docPdf.y).lineTo(555, docPdf.y).stroke();
+      docPdf.moveDown(0.8);
+
+      // Lista (simples e leve)
+      docPdf.fontSize(12).text("Lançamentos do mês:", { underline: true });
+      docPdf.moveDown(0.5);
+
+      if (!itensMes.length) {
+        docPdf.fontSize(11).fillColor("gray").text("Nenhum lançamento encontrado neste mês.");
+        docPdf.fillColor("black");
+        docPdf.end();
+        return;
+      }
+
+      docPdf.fontSize(9);
+
+      for (const it of itensMes) {
+        const dataBR = it.data ? it.data.split("-").reverse().join("/") : "";
+        const tipoPT = it.tipo === "income" ? "Receita" : it.tipo === "expense" ? "Despesa" : it.tipo;
+
+        const linha =
+          `${dataBR} | ${tipoPT} | ${it.categoriaId}${it.subcategoriaId ? " / " + it.subcategoriaId : ""} | ` +
+          `${it.descricao || ""} | R$ ${Number(it.valor || 0).toFixed(2)}`;
+
+        docPdf.text(linha, { width: 515 });
+
+        // quebra de página se ficar perto do fim
+        if (docPdf.y > 760) docPdf.addPage();
+      }
+
+      docPdf.end();
+    });
+
+    // =============================
+    // 5) SUBIR NO FIREBASE STORAGE
+    // =============================
+    const bucket = admin.storage().bucket();
+    const filePath = `relatorios/${uid}/relatorio-${mes}-${Date.now()}.pdf`;
+    const file = bucket.file(filePath);
+
+    await file.save(pdfBuffer, {
+      contentType: "application/pdf",
+      resumable: false,
+      metadata: {
+        cacheControl: "private, max-age=0, no-transform",
+      },
+    });
+
+    console.log("☁️ PDF salvo no Storage:", filePath);
+
+    // =============================
+    // 6) GERAR URL ASSINADA (PRA BAIXAR)
+    // =============================
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 1000 * 60 * 60 * 24, // 24h
+    });
+
+    console.log("🔗 URL assinada gerada:", url);
+
+    // =============================
+    // 7) RESPOSTA PRO NICOCHAT
+    // =============================
+    return res.json({
+      ok: true,
+      mes,
+      totalIncome,
+      totalExpense,
+      saldo: totalIncome - totalExpense,
+      quantidadeLancamentos: itensMes.length,
+      url,
+    });
+  } catch (e) {
+    console.error("❌ Erro /relatorio/pdf:", e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
+
 
 // -------------------------------------------------------------
 // 🚀 START
