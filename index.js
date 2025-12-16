@@ -136,50 +136,61 @@ async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
   };
 }
 
-// 🔢 Função reutilizável — cálculo de gasto em um período (com debug)
-async function calcularGastoPeriodo(uid, inicio, fim, meioRaw) {
+// 🔢 Função reutilizável — cálculo de gasto em um período (RETORNA LISTA)
+async function calcularGastoPeriodo(uid, inicio, fim, meioRaw, limiteRaw) {
   const inicioLimpo = inicio.toString().trim();
   const fimLimpo = fim.toString().trim();
 
   const meio = (meioRaw || "").toString().trim().toLowerCase();
+  const limite = Number(limiteRaw || 50); // padrão 50
 
   let query = db
     .collection("users")
     .doc(uid)
     .collection("transactions")
     .where("data", ">=", inicioLimpo)
-    .where("data", "<=", fimLimpo);
+    .where("data", "<=", fimLimpo)
+    .where("tipo", "==", "expense"); // ✅ não busca income
 
   if (meio && meio !== "todos") {
     query = query.where("meio", "==", meio);
   }
 
+  // ✅ ordena por data + limita (pra não explodir no WhatsApp)
+  query = query.orderBy("data", "desc").limit(limite);
+
   const snap = await query.get();
 
-  const docsEncontrados = snap.size;
-
   let totalGasto = 0;
-  let qtd = 0;
+  const lancamentos = [];
 
   snap.forEach((docSnap) => {
     const dados = docSnap.data();
-
-    if (dados.tipo !== "expense") return;
-    console.log("🔎 DOC NO PERÍODO (GASTO):", docSnap.id, dados);
-
-
     const v = Number(dados.valor) || 0;
     totalGasto += v;
-    qtd += 1;
+
+    lancamentos.push({
+      id: docSnap.id,
+      data: dados.data || null,
+      descricao: dados.descricao || null,
+      valor: v,
+      meio: dados.meio || null,
+      cartao: dados.cartao || null,
+      categoriaId: dados.categoriaId || null,
+      subcategoriaId: dados.subcategoriaId || dados.subcategoria || null,
+      parcelas: dados.parcelas || dados.installments || 1,
+      parcelado: dados.parcelado || (dados.isInstallment ? "sim" : "nao") || null,
+    });
   });
 
   return {
     inicio: inicioLimpo,
     fim: fimLimpo,
     meio: meio || "todos",
-    docsEncontrados,
+    docsEncontrados: snap.size,
     totalGasto,
-    quantidadeLancamentos: qtd,
+    quantidadeLancamentos: snap.size,
+    lancamentos,
   };
 }
 
