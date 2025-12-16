@@ -547,32 +547,31 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email);
 
-    if (acao === "gasto_periodo") {
-      const { inicio, fim, meio = "todos" } = req.body;
+ if (acao === "gasto_periodo") {
+  const { inicio, fim, meio = "todos", limite = 50 } = req.body;
 
-      if (!inicio || !fim) {
-        return res.status(400).json({
-          error:
-            "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
-        });
-      }
+  if (!inicio || !fim) {
+    return res.status(400).json({
+      error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
+    });
+  }
 
-const { limite = 50 } = req.body;
-const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio, limite);
+  const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio, limite);
 
-      return res.set("Content-Type", "application/json").json({
-        status: "sucesso",
-        acao: "gasto_periodo",
-        data: {
-          inicio: resultado.inicio,
-          fim: resultado.fim,
-          meio: resultado.meio,
-          docsEncontrados: resultado.docsEncontrados,
-          totalGasto: resultado.totalGasto,
-          quantidadeLancamentos: resultado.quantidadeLancamentos,
-        },
-      });
-    }
+  return res.set("Content-Type", "application/json").json({
+    status: "sucesso",
+    acao: "gasto_periodo",
+    data: {
+      inicio: resultado.inicio,
+      fim: resultado.fim,
+      meio: resultado.meio,
+      docsEncontrados: resultado.docsEncontrados,
+      totalGasto: resultado.totalGasto,
+      quantidadeLancamentos: resultado.quantidadeLancamentos,
+      lancamentos: resultado.lancamentos, // ✅ lista que o Nicochat precisa
+    },
+  });
+}
 
     if (acao === "receita_periodo") {
       const { inicio, fim, meio = "todos" } = req.body;
