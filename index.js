@@ -89,50 +89,61 @@ async function getUserId(email) {
   }
 }
 
-// 🔢 Função reutilizável — cálculo de RECEITA em um período
-async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw) {
+// 🔢 Função reutilizável — cálculo de RECEITA em um período (RETORNA LISTA)
+async function calcularReceitaPeriodo(uid, inicio, fim, meioRaw, limiteRaw) {
   const inicioLimpo = inicio.toString().trim();
   const fimLimpo = fim.toString().trim();
 
   const meio = (meioRaw || "").toString().trim().toLowerCase();
+  const limite = Number(limiteRaw || 50); // padrão 50
 
   let query = db
     .collection("users")
     .doc(uid)
     .collection("transactions")
     .where("data", ">=", inicioLimpo)
-    .where("data", "<=", fimLimpo);
+    .where("data", "<=", fimLimpo)
+    .where("tipo", "==", "income"); // ✅ não busca expense
 
   if (meio && meio !== "todos") {
     query = query.where("meio", "==", meio);
   }
 
+  // ✅ ordena por data + limita (pra não explodir no WhatsApp)
+  query = query.orderBy("data", "desc").limit(limite);
+
   const snap = await query.get();
 
-  const docsEncontrados = snap.size;
-
   let totalReceita = 0;
-  let qtd = 0;
+  const lancamentos = [];
 
   snap.forEach((docSnap) => {
     const dados = docSnap.data();
-
-    console.log("🔎 DOC NO PERÍODO (RECEITA):", docSnap.id, dados);
-
-    if (dados.tipo !== "income") return;
-
     const v = Number(dados.valor) || 0;
     totalReceita += v;
-    qtd += 1;
+
+    lancamentos.push({
+      id: docSnap.id,
+      data: dados.data || null,
+      descricao: dados.descricao || null,
+      valor: v,
+      meio: dados.meio || null,
+      cartao: dados.cartao || null,
+      categoriaId: dados.categoriaId || null,
+      subcategoriaId: dados.subcategoriaId || dados.subcategoria || null,
+      parcelas: dados.parcelas || dados.installments || 1,
+      parcelado: dados.parcelado || (dados.isInstallment ? "sim" : "nao") || null,
+    });
   });
 
   return {
     inicio: inicioLimpo,
     fim: fimLimpo,
     meio: meio || "todos",
-    docsEncontrados,
+    docsEncontrados: snap.size,
     totalReceita,
-    quantidadeLancamentos: qtd,
+    quantidadeLancamentos: snap.size,
+    lancamentos,
   };
 }
 
@@ -573,31 +584,31 @@ app.post("/consulta", async (req, res) => {
   });
 }
 
-    if (acao === "receita_periodo") {
-      const { inicio, fim, meio = "todos" } = req.body;
+if (acao === "receita_periodo") {
+  const { inicio, fim, meio = "todos", limite = 50 } = req.body;
 
-      if (!inicio || !fim) {
-        return res.status(400).json({
-          error:
-            "Para 'receita_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
-        });
-      }
+  if (!inicio || !fim) {
+    return res.status(400).json({
+      error: "Para 'receita_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
+    });
+  }
 
-      const resultado = await calcularReceitaPeriodo(uid, inicio, fim, meio);
+  const resultado = await calcularReceitaPeriodo(uid, inicio, fim, meio, limite);
 
-      return res.set("Content-Type", "application/json").json({
-        status: "sucesso",
-        acao: "receita_periodo",
-        data: {
-          inicio: resultado.inicio,
-          fim: resultado.fim,
-          meio: resultado.meio,
-          docsEncontrados: resultado.docsEncontrados,
-          totalReceita: resultado.totalReceita,
-          quantidadeLancamentos: resultado.quantidadeLancamentos,
-        },
-      });
-    }
+  return res.set("Content-Type", "application/json").json({
+    status: "sucesso",
+    acao: "receita_periodo",
+    data: {
+      inicio: resultado.inicio,
+      fim: resultado.fim,
+      meio: resultado.meio,
+      docsEncontrados: resultado.docsEncontrados,
+      totalReceita: resultado.totalReceita,
+      quantidadeLancamentos: resultado.quantidadeLancamentos,
+      lancamentos: resultado.lancamentos, // ✅ lista
+    },
+  });
+}
 
     if (acao === "saldo_por_meio") {
       const { meio = "dinheiro" } = req.body;
