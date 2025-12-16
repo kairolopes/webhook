@@ -383,103 +383,197 @@ app.post("/conta", async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// 💸 LANÇAMENTO (MESMO PADRÃO DO FRONT-END, COM LOGS)
-// -------------------------------------------------------------
+
+function normalizarTexto(s) {
+  return (s ?? "").toString().trim().toLowerCase();
+}
+
+const MEIOS_EXPENSE = new Set([
+  "credito",
+  "debito",
+  "pix",
+  "dinheiro",
+  "boleto",
+  "transferencia",
+  "outro",
+]);
+
+const MEIOS_INCOME = new Set([
+  "debito",
+  "pix",
+  "dinheiro",
+  "boleto",
+  "transferencia",
+  "outro",
+]);
+
+async function garantirCartaoExiste(uid, cartao) {
+  const nomeCartao = cartao.toString().trim();
+
+  const snap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("accounts")
+    .where("tipo", "==", "cartao")
+    .where("nome", "==", nomeCartao)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    throw new Error(
+      `Cartão '${nomeCartao}' não está cadastrado. Cadastre o cartão antes de lançar no crédito.`
+    );
+  }
+
+  return nomeCartao;
+}
+
+async function garantirContaExiste(uid, conta) {
+  const nomeConta = conta.toString().trim();
+
+  const snap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("accounts")
+    .where("nome", "==", nomeConta)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    throw new Error(
+      `Conta '${nomeConta}' não está cadastrada. Cadastre a conta antes de lançar.`
+    );
+  }
+
+  const dados = snap.docs[0].data() || {};
+  if (String(dados.tipo || "").toLowerCase() === "cartao") {
+    throw new Error(
+      `A conta '${nomeConta}' é do tipo cartão. Para crédito, envie meio='credito' e informe o campo 'cartao'.`
+    );
+  }
+
+  return nomeConta;
+}
+
 app.post("/lancamento", async (req, res) => {
   try {
     console.log("💾 [LANÇAMENTO] Body recebido:", req.body);
 
     const {
       email,
-      tipo, // "expense" | "income"
-      meio, // "credito" | "debito" | "dinheiro" | "pix"
-      cartao, // ex: "Neon" (obrigatório só se for crédito)
+      tipo,
+      meio,
+      cartao,
+      conta, // ✅ NOVO (obrigatório quando não for crédito)
       categoriaId,
       subcategoriaId,
       descricao = "",
       valor,
-      data, // pode vir "08/12/2025" ou "2025-12-08"
+      data,
       parcelas,
       installments,
     } = req.body;
 
-    if (!email || !tipo || !meio || !categoriaId || !valor || !data) {
-      console.log("⚠️ [LANÇAMENTO] Campos faltando:", {
-        email,
-        tipo,
-        meio,
-        categoriaId,
-        valor,
-        data,
-      });
+    const tipoLimpo = normalizarTexto(tipo);
+    const meioLimpo = normalizarTexto(meio);
+    const emailLimpo = (email ?? "").toString().trim().toLowerCase();
+
+    if (!emailLimpo || !tipoLimpo || !categoriaId || !valor || !data) {
       return res.status(400).json({
-        error:
-          "Campos obrigatórios faltando (email, tipo, meio, categoriaId, valor, data).",
+        error: "Campos obrigatórios faltando (email, tipo, categoriaId, valor, data).",
       });
     }
 
-    const meioLimpo = meio.toString().trim().toLowerCase();
+    if (tipoLimpo !== "income" && tipoLimpo !== "expense") {
+      return res.status(400).json({ error: "tipo deve ser 'income' ou 'expense'." });
+    }
+
+    if (!meioLimpo) {
+      return res.status(400).json({
+        error: "Campo 'meio' é obrigatório (pix, debito, dinheiro, boleto, transferencia, outro; credito só em despesa).",
+      });
+    }
+
+    if (tipoLimpo === "income") {
+      if (!MEIOS_INCOME.has(meioLimpo)) {
+        return res.status(400).json({
+          error: "Receita não aceita 'credito'. Use: pix, debito, dinheiro, boleto, transferencia ou outro.",
+        });
+      }
+    } else {
+      if (!MEIOS_EXPENSE.has(meioLimpo)) {
+        return res.status(400).json({
+          error: "Meio inválido para despesa. Use: credito, debito, pix, dinheiro, boleto, transferencia ou outro.",
+        });
+      }
+    }
+
     const dataIso = normalizarData(data);
+    if (!dataIso) return res.status(400).json({ error: "Data inválida" });
 
-    console.log("🗓 [LANÇAMENTO] Data recebida:", data, "→ normalizada para:", dataIso);
+    const uid = await getUserId(emailLimpo);
 
-    if (!dataIso) {
-      return res.status(400).json({ error: "Data inválida" });
+    // ✅ Verifica cadastro no Firebase
+    let cartaoFinal = null;
+    let contaFinal = null;
+
+    if (meioLimpo === "credito") {
+      if (tipoLimpo !== "expense") {
+        return res.status(400).json({ error: "Crédito só é permitido para despesas." });
+      }
+      if (!cartao) {
+        return res.status(400).json({
+          error: "Para meio='credito', informe o campo 'cartao' (nome do cartão).",
+        });
+      }
+      cartaoFinal = await garantirCartaoExiste(uid, cartao);
+    } else {
+      if (!conta) {
+        return res.status(400).json({
+          error: "Para meios diferentes de crédito, informe o campo 'conta' (nome da conta cadastrada).",
+        });
+      }
+      contaFinal = await garantirContaExiste(uid, conta);
     }
 
-    // Se for CRÉDITO, precisa do nome do cartão
-    if (meioLimpo === "credito" && !cartao) {
-      console.log(
-        "⚠️ [LANÇAMENTO] Crédito sem cartão informado. Body:",
-        req.body
-      );
-      return res.status(400).json({
-        error:
-          "Para lançamentos no crédito, informe o nome do cartão no campo 'cartao'.",
-      });
-    }
-
-    const uid = await getUserId(email);
-
-    const nParcelas = Number(parcelas || installments || 1);
     const totalValor = Number(valor);
-
     if (isNaN(totalValor) || totalValor <= 0) {
-      console.log("⚠️ [LANÇAMENTO] Valor inválido:", valor);
       return res.status(400).json({ error: "Valor inválido" });
     }
 
+    const nParcelas = Number(parcelas || installments || 1);
     if (isNaN(nParcelas) || nParcelas < 1) {
-      console.log("⚠️ [LANÇAMENTO] Número de parcelas inválido:", nParcelas);
       return res.status(400).json({ error: "Número de parcelas inválido" });
+    }
+
+    if (nParcelas > 1 && meioLimpo !== "credito") {
+      return res.status(400).json({
+        error: "Parcelamento só é permitido para meio='credito'.",
+      });
     }
 
     const ref = db.collection("users").doc(uid).collection("transactions");
     const grupoParcelas = nParcelas > 1 ? `PARC-${Date.now()}` : "";
 
-    // ------------------------------
-    // À vista (1 parcela)
-    // ------------------------------
+    // À vista
     if (nParcelas === 1) {
       const docData = {
-        cartao: cartao || null,
+        tipo: tipoLimpo,
+        meio: meioLimpo,
+        cartao: cartaoFinal,
+        conta: contaFinal,
         categoriaId,
         subcategoriaId: subcategoriaId || null,
         data: dataIso,
         descricao,
         grupoParcelas,
-        meio: meioLimpo,
         numeroParcela: 1,
         parcelado: "nao",
         parcelas: 1,
-        tipo,
         valor: totalValor,
       };
 
       const docRef = await ref.add(docData);
-
-      console.log("✅ [LANÇAMENTO] Documento criado (à vista):", docRef.id, docData);
 
       return res.json({
         status: "sucesso",
@@ -487,6 +581,57 @@ app.post("/lancamento", async (req, res) => {
         docId: docRef.id,
         dados: docData,
       });
+    }
+
+    // Parcelado (crédito)
+    const valorParcela = totalValor / nParcelas;
+    const batch = db.batch();
+    const idsParcelas = [];
+
+    const [anoBase, mesBase, diaBase] = dataIso.split("-").map(Number);
+    const dataBase = new Date(anoBase, mesBase - 1, diaBase);
+
+    for (let i = 0; i < nParcelas; i++) {
+      const d = new Date(dataBase);
+      d.setMonth(dataBase.getMonth() + i);
+      const dataParcela = d.toISOString().split("T")[0];
+
+      const docRef = ref.doc();
+      const docData = {
+        tipo: tipoLimpo,
+        meio: meioLimpo,
+        cartao: cartaoFinal,
+        conta: null,
+        categoriaId,
+        subcategoriaId: subcategoriaId || null,
+        data: dataParcela,
+        descricao: `${descricao} (parc. ${i + 1}/${nParcelas})`,
+        grupoParcelas,
+        numeroParcela: i + 1,
+        parcelado: "sim",
+        parcelas: nParcelas,
+        valor: valorParcela,
+      };
+
+      batch.set(docRef, docData);
+      idsParcelas.push({ id: docRef.id, data: docData });
+    }
+
+    await batch.commit();
+
+    return res.json({
+      status: "sucesso",
+      tipoLancamento: "parcelado",
+      parcelasCriadas: nParcelas,
+      documentos: idsParcelas.map((p) => ({ id: p.id, data: p.data })),
+    });
+  } catch (err) {
+    console.error("❌ Erro em POST /lancamento:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
     }
 
     // ------------------------------
