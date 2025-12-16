@@ -172,37 +172,43 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw, limiteRaw) {
 
   const snap = await query.get();
 
-  let totalGasto = 0;
-  const lancamentos = [];
+let totalGasto = 0;
+let qtd = 0;
+let itens = [];
 
-  snap.forEach((docSnap) => {
-    const dados = docSnap.data();
-    const v = Number(dados.valor) || 0;
-    totalGasto += v;
+snap.forEach((docSnap) => {
+  const dados = docSnap.data();
 
-    lancamentos.push({
-      id: docSnap.id,
-      data: dados.data || null,
-      descricao: dados.descricao || null,
-      valor: v,
-      meio: dados.meio || null,
-      cartao: dados.cartao || null,
-      categoriaId: dados.categoriaId || null,
-      subcategoriaId: dados.subcategoriaId || dados.subcategoria || null,
-      parcelas: dados.parcelas || dados.installments || 1,
-      parcelado: dados.parcelado || (dados.isInstallment ? "sim" : "nao") || null,
-    });
+  if (dados.tipo !== "expense") return;
+
+  const valor = Number(dados.valor) || 0;
+
+  totalGasto += valor;
+  qtd += 1;
+
+  itens.push({
+    id: docSnap.id,
+    data: dados.data,
+    descricao: dados.descricao || "",
+    valor,
+    categoria: dados.categoriaId || null,
+    subcategoria: dados.subcategoriaId || null,
+    meio: dados.meio || null,
+    cartao: dados.cartao || null,
+    parcelado: dados.parcelado || "nao"
   });
+});
 
-  return {
-    inicio: inicioLimpo,
-    fim: fimLimpo,
-    meio: meio || "todos",
-    docsEncontrados: snap.size,
-    totalGasto,
-    quantidadeLancamentos: snap.size,
-    lancamentos,
-  };
+return {
+  inicio: inicioLimpo,
+  fim: fimLimpo,
+  meio: meio || "todos",
+  docsEncontrados: snap.size,
+  totalGasto,
+  quantidadeLancamentos: qtd,
+  lancamentos: itens, // ✅ agora volta gasto por gasto no payload do POST
+};
+
 }
 
 // ---------------------------------------------------------
