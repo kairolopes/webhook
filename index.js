@@ -623,6 +623,7 @@ if (acao === "receita_periodo") {
       let saldo = 0;
       snap.forEach((docSnap) => {
         const dados = docSnap.data();
+        console.log("🔎 DOC NO PERÍODO (RECEITA):", docSnap.id, dados);
         const v = Number(dados.valor) || 0;
 
         if (dados.tipo === "income") saldo += v;
