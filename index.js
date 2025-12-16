@@ -557,7 +557,8 @@ app.post("/consulta", async (req, res) => {
         });
       }
 
-      const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio);
+const { limite = 50 } = req.body;
+const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio, limite);
 
       return res.set("Content-Type", "application/json").json({
         status: "sucesso",
