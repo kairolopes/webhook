@@ -168,16 +168,16 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw, limiteRaw) {
   }
 
   // ✅ ordena por data + limita (pra não explodir no WhatsApp)
-  query = query.orderBy("data", "desc").limit(limite);
+query = query.orderBy("data", "desc").limit(limite);
 
-  const snap = await query.get();
-  console.log("🚦 [GASTO] Vai rodar query no Firestore...");
-  const snap = await query.get();
-  console.log("✅ [GASTO] Query OK. docs:", snap.size);
+console.log("🚦 [GASTO] Vai rodar query no Firestore...");
+const snap = await query.get();
+console.log("✅ [GASTO] Query OK. docs:", snap.size);
 
 let totalGasto = 0;
 let qtd = 0;
 let itens = [];
+
 
 snap.forEach((docSnap) => {
   const dados = docSnap.data();
