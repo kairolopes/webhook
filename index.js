@@ -171,6 +171,9 @@ async function calcularGastoPeriodo(uid, inicio, fim, meioRaw, limiteRaw) {
   query = query.orderBy("data", "desc").limit(limite);
 
   const snap = await query.get();
+  console.log("🚦 [GASTO] Vai rodar query no Firestore...");
+  const snap = await query.get();
+  console.log("✅ [GASTO] Query OK. docs:", snap.size);
 
 let totalGasto = 0;
 let qtd = 0;
@@ -178,6 +181,8 @@ let itens = [];
 
 snap.forEach((docSnap) => {
   const dados = docSnap.data();
+  console.log("📄 [GASTO_DOC]", docSnap.id, dados);
+
 
   if (dados.tipo !== "expense") return;
 
@@ -564,16 +569,22 @@ app.post("/consulta", async (req, res) => {
 
     const uid = await getUserId(email);
 
- if (acao === "gasto_periodo") {
+if (acao === "gasto_periodo") {
+  console.log("✅ [CONSULTA] Entrou no bloco gasto_periodo");
+
   const { inicio, fim, meio = "todos", limite = 50 } = req.body;
+  console.log("📌 [CONSULTA] Parâmetros recebidos:", { inicio, fim, meio, limite });
 
   if (!inicio || !fim) {
+    console.log("❌ [CONSULTA] Falta inicio ou fim");
     return res.status(400).json({
       error: "Para 'gasto_periodo' informe 'inicio' e 'fim' (YYYY-MM-DD).",
     });
   }
 
+  console.log("🚦 [CONSULTA] Chamando calcularGastoPeriodo...");
   const resultado = await calcularGastoPeriodo(uid, inicio, fim, meio, limite);
+  console.log("✅ [CONSULTA] calcularGastoPeriodo retornou. qtd:", resultado?.quantidadeLancamentos);
 
   return res.set("Content-Type", "application/json").json({
     status: "sucesso",
@@ -585,10 +596,11 @@ app.post("/consulta", async (req, res) => {
       docsEncontrados: resultado.docsEncontrados,
       totalGasto: resultado.totalGasto,
       quantidadeLancamentos: resultado.quantidadeLancamentos,
-      lancamentos: resultado.lancamentos, // ✅ lista que o Nicochat precisa
+      lancamentos: resultado.lancamentos,
     },
   });
 }
+
 
 if (acao === "receita_periodo") {
   const { inicio, fim, meio = "todos", limite = 50 } = req.body;
