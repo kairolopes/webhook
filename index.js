@@ -463,7 +463,8 @@ app.post("/lancamento", async (req, res) => {
 
     const tipoLimpo = normalizarTexto(tipo);
     const meioLimpo = normalizarTexto(meio);
-    const emailLimpo = (email ?? "").toString().trim().toLowerCase();
+    const emailLimpo = normalizarEmail(email);
+    const uid = await getUserId(emailLimpo);
 
     if (!emailLimpo || !tipoLimpo || !categoriaId || !valor || !data) {
       return res.status(400).json({
@@ -1012,6 +1013,12 @@ function normalizarNome(s) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+function normalizarEmail(email) {
+  if (!email) throw new Error("Email não informado");
+  return String(email).trim().toLowerCase();
+}
+
 
 // Levenshtein distance
 function levenshtein(a, b) {
