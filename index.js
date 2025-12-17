@@ -361,7 +361,7 @@ app.post("/conta", async (req, res) => {
     await db
       .collection("users")
       .doc(uid)
-      .collection("accounts")
+      .collection("wallets")
       .add(data);
 
     res.json({ status: "sucesso" });
@@ -687,7 +687,8 @@ app.post("/consulta", async (req, res) => {
       });
     }
 
-    const uid = await getUserId(email);
+    const uid = await getUserId(email.toString().trim().toLowerCase());
+
 
 if (acao === "gasto_periodo") {
   console.log("✅ [CONSULTA] Entrou no bloco gasto_periodo");
