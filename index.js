@@ -733,6 +733,57 @@ app.get("/usuario-por-telefone", async (req, res) => {
   }
 });
 
+
+// -------------------------------------------------------------
+// 🧾 WEBHOOK - LISTAR CARTÕES DE CRÉDITO CADASTRADOS (por e-mail)
+// -------------------------------------------------------------
+app.post("/cartoes/listar", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({ error: "Informe 'email' no body." });
+    }
+
+    const uid = await getUserId(email.toString().trim().toLowerCase());
+
+    const snap = await db
+      .collection("users")
+      .doc(uid)
+      .collection("accounts")
+      .where("tipo", "==", "cartao")
+      .get();
+
+    const cartoes = [];
+    snap.forEach((docSnap) => {
+      const d = docSnap.data() || {};
+      cartoes.push({
+        id: docSnap.id,
+        nome: d.nome || null,
+        limite: Number(d.limite || 0),
+        fechamento: d.fechamento || null,
+        vencimento: d.vencimento || null,
+      });
+    });
+
+    // ordena por nome
+    cartoes.sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || "")));
+
+    return res.json({
+      status: "sucesso",
+      uid,
+      quantidade: cartoes.length,
+      cartoes,
+      nomes: cartoes.map((c) => c.nome), // ✅ útil pro Nicochat
+    });
+  } catch (err) {
+    console.error("Erro em /cartoes/listar:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+
 // -------------------------------------------------------------
 // 🔍 CONSULTAS FINANCEIRAS (POST /consulta — Nicochat)
 // -------------------------------------------------------------
