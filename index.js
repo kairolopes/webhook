@@ -17,10 +17,8 @@ const PORT = process.env.PORT || 3000;
 // 🔥 Firebase
 // -------------------------------------------------------------
 try {
- const jsonString =
-  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-  process.env.GOOGLE_APPLICATION_CREDENTIALIALS; // fallback se estiver digitada errado no Render
-  const projectId = process.env.GCLOUD_PROJECT;
+ const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS; // Sem fallback com erro de digitação
+
 
 
   console.log("ENV keys:", Object.keys(process.env).filter(k => k.includes("GOOGLE") || k.includes("GCLOUD")));
