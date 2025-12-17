@@ -17,7 +17,9 @@ const PORT = process.env.PORT || 3000;
 // 🔥 Firebase
 // -------------------------------------------------------------
 try {
-  const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS; // JSON do service account
+ const jsonString =
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  process.env.GOOGLE_APPLICATION_CREDENTIALIALS; // fallback se estiver digitada errado no Render
   const projectId = process.env.GCLOUD_PROJECT;
 
   if (!jsonString) {
