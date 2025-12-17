@@ -581,7 +581,7 @@ app.post("/lancamento", async (req, res) => {
         docId: docRef.id,
         dados: docData,
       });
-    }
+    
 
     // Parcelado (crédito)
     const valorParcela = totalValor / nParcelas;
