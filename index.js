@@ -17,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 // 🔥 Firebase
 // -------------------------------------------------------------
 admin.initializeApp();
+console.log("🔥 Firebase Project ID:", admin.app().options.projectId);
 console.log("✅ Firebase conectado");
 
 
