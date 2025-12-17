@@ -17,11 +17,22 @@ const PORT = process.env.PORT || 3000;
 // 🔥 Firebase
 // -------------------------------------------------------------
 try {
-  const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS; // JSON do service account
   const projectId = process.env.GCLOUD_PROJECT;
 
+  if (!jsonString) {
+    throw new Error("Faltou a env GOOGLE_APPLICATION_CREDENTIALS (JSON do Firebase).");
+  }
+  if (!projectId) {
+    throw new Error("Faltou a env GCLOUD_PROJECT (id do projeto).");
+  }
+
   const tempPath = path.join(os.tmpdir(), "firebase_key.json");
-  fs.writeFileSync(tempPath, jsonString);
+
+  // garante string válida
+  const conteudo = typeof jsonString === "string" ? jsonString : String(jsonString);
+
+  fs.writeFileSync(tempPath, conteudo, { encoding: "utf8" });
 
   admin.initializeApp({
     credential: admin.credential.cert(require(tempPath)),
@@ -33,6 +44,7 @@ try {
   console.error("Firebase ERROR:", err.message);
   process.exit(1);
 }
+
 
 const db = admin.firestore();
 const auth = admin.auth();
