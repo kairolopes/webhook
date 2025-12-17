@@ -22,6 +22,10 @@ try {
   process.env.GOOGLE_APPLICATION_CREDENTIALIALS; // fallback se estiver digitada errado no Render
   const projectId = process.env.GCLOUD_PROJECT;
 
+
+  console.log("ENV keys:", Object.keys(process.env).filter(k => k.includes("GOOGLE") || k.includes("GCLOUD")));
+
+ 
   if (!jsonString) {
     throw new Error("Faltou a env GOOGLE_APPLICATION_CREDENTIALS (JSON do Firebase).");
   }
@@ -32,14 +36,11 @@ try {
   const tempPath = path.join(os.tmpdir(), "firebase_key.json");
 
   // garante string válida
-  const conteudo = typeof jsonString === "string" ? jsonString : String(jsonString);
-
-  fs.writeFileSync(tempPath, conteudo, { encoding: "utf8" });
-
-  admin.initializeApp({
-    credential: admin.credential.cert(require(tempPath)),
-    projectId,
-  });
+ const credObj = JSON.parse(jsonString);
+admin.initializeApp({
+  credential: admin.credential.cert(credObj),
+  projectId,
+});
 
   console.log("✅ Firebase conectado");
 } catch (err) {
