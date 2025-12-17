@@ -1148,6 +1148,6 @@ app.post("/cartoes/match", async (req, res) => {
 // -------------------------------------------------------------
 // 🚀 START
 // -------------------------------------------------------------
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log("🚀 API rodando na porta", PORT);
 });
