@@ -1089,7 +1089,9 @@ app.post("/cartoes/match", async (req, res) => {
       });
     }
 
-    const uid = await getUserId(email.toString().trim().toLowerCase());
+    // ✅ ÚNICA forma correta
+    const emailLimpo = normalizarEmail(email);
+    const uid = await getUserId(emailLimpo);
 
     const snap = await db
       .collection("users")
@@ -1112,7 +1114,6 @@ app.post("/cartoes/match", async (req, res) => {
       });
     }
 
-    // calcula scores
     const ranked = cartoes
       .map((nome) => ({
         nome,
@@ -1122,9 +1123,6 @@ app.post("/cartoes/match", async (req, res) => {
 
     const melhor = ranked[0];
     const sugestoes = ranked.slice(0, Number(limite_sugestoes) || 5);
-
-    // limiar (ajuste fino):
-    // 0.72 costuma pegar "parte do nome" e pequenos erros, sem dar match errado fácil
     const LIMIAR = 0.72;
 
     if (!melhor || melhor.score < LIMIAR) {
@@ -1132,25 +1130,28 @@ app.post("/cartoes/match", async (req, res) => {
         status: "falha",
         motivo: "cartao_nao_encontrado",
         cartao_input,
-        mensagem:
-          "Este cartão não está cadastrado (ou o nome não bateu). Tente escrever o nome mais próximo do cadastrado.",
-        sugestoes: sugestoes.map((s) => ({ nome: s.nome, score: Number(s.score.toFixed(3)) })),
+        sugestoes: sugestoes.map((s) => ({
+          nome: s.nome,
+          score: Number(s.score.toFixed(3)),
+        })),
       });
     }
 
     return res.json({
       status: "sucesso",
       cartao_input,
-      cartao_correspondente: melhor.nome, // ✅ nome correto para você usar no /lancamento
+      cartao_correspondente: melhor.nome,
       score: Number(melhor.score.toFixed(3)),
-      sugestoes: sugestoes.map((s) => ({ nome: s.nome, score: Number(s.score.toFixed(3)) })),
+      sugestoes: sugestoes.map((s) => ({
+        nome: s.nome,
+        score: Number(s.score.toFixed(3)),
+      })),
     });
   } catch (err) {
     console.error("Erro em /cartoes/match:", err);
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 
 // -------------------------------------------------------------
