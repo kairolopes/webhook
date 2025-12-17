@@ -16,35 +16,8 @@ const PORT = process.env.PORT || 3000;
 // -------------------------------------------------------------
 // 🔥 Firebase
 // -------------------------------------------------------------
-try {
- const jsonString = process.env.GOOGLE_APPLICATION_CREDENTIALS; // Sem fallback com erro de digitação
-
-
-
-  console.log("ENV keys:", Object.keys(process.env).filter(k => k.includes("GOOGLE") || k.includes("GCLOUD")));
-
- 
-  if (!jsonString) {
-    throw new Error("Faltou a env GOOGLE_APPLICATION_CREDENTIALS (JSON do Firebase).");
-  }
-  if (!projectId) {
-    throw new Error("Faltou a env GCLOUD_PROJECT (id do projeto).");
-  }
-
-  const tempPath = path.join(os.tmpdir(), "firebase_key.json");
-
-  // garante string válida
- const credObj = JSON.parse(jsonString);
-admin.initializeApp({
-  credential: admin.credential.cert(credObj),
-  projectId,
-});
-
-  console.log("✅ Firebase conectado");
-} catch (err) {
-  console.error("Firebase ERROR:", err.message);
-  process.exit(1);
-}
+admin.initializeApp();
+console.log("✅ Firebase conectado");
 
 
 const db = admin.firestore();
