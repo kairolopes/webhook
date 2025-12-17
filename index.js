@@ -400,20 +400,21 @@ async function garantirCartaoExiste(uid, cartao) {
   const snap = await db
     .collection("users")
     .doc(uid)
-    .collection("accounts")
-    .where("tipo", "==", "cartao")
+    .collection("wallets")
+    .where("tipo", "==", "credito")
     .where("nome", "==", nomeCartao)
     .limit(1)
     .get();
 
   if (snap.empty) {
     throw new Error(
-      `Cartão '${nomeCartao}' não está cadastrado. Cadastre o cartão antes de lançar no crédito.`
+      `Cartão '${nomeCartao}' não está cadastrado.`
     );
   }
 
   return nomeCartao;
 }
+
 
 async function garantirContaExiste(uid, conta) {
   const nomeConta = conta.toString().trim();
@@ -421,21 +422,20 @@ async function garantirContaExiste(uid, conta) {
   const snap = await db
     .collection("users")
     .doc(uid)
-    .collection("accounts")
+    .collection("wallets")
     .where("nome", "==", nomeConta)
     .limit(1)
     .get();
 
   if (snap.empty) {
-    throw new Error(
-      `Conta '${nomeConta}' não está cadastrada. Cadastre a conta antes de lançar.`
-    );
+    throw new Error(`Conta '${nomeConta}' não cadastrada.`);
   }
 
   const dados = snap.docs[0].data() || {};
-  if (String(dados.tipo || "").toLowerCase() === "cartao") {
+
+  if (String(dados.tipo) === "credito") {
     throw new Error(
-      `A conta '${nomeConta}' é do tipo cartão. Para crédito, envie meio='credito' e informe o campo 'cartao'.`
+      `A conta '${nomeConta}' é cartão. Use meio='credito'.`
     );
   }
 
@@ -638,8 +638,8 @@ app.post("/cartoes/listar", async (req, res) => {
     const snap = await db
       .collection("users")
       .doc(uid)
-      .collection("accounts")
-      .where("tipo", "==", "cartao")
+      .collection("wallets")
+      .where("tipo", "==", "credito")
       .get();
 
     const cartoes = [];
@@ -790,8 +790,8 @@ if (acao === "receita_periodo") {
       const snap = await db
         .collection("users")
         .doc(uid)
-        .collection("accounts")
-        .where("tipo", "==", "cartao")
+        .collection("wallets")
+        .where("tipo", "==", "credito")
         .where("nome", "==", cartao.trim())
         .limit(1)
         .get();
@@ -1094,8 +1094,8 @@ app.post("/cartoes/match", async (req, res) => {
     const snap = await db
       .collection("users")
       .doc(uid)
-      .collection("accounts")
-      .where("tipo", "==", "cartao")
+      .collection("wallets")
+      .where("tipo", "==", "credito")
       .get();
 
     const cartoes = [];
