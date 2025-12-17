@@ -464,7 +464,7 @@ app.post("/lancamento", async (req, res) => {
       tipo,
       meio,
       cartao,
-      conta, // ✅ NOVO (obrigatório quando não for crédito)
+      conta, // obrigatório quando não for crédito
       categoriaId,
       subcategoriaId,
       descricao = "",
@@ -555,7 +555,9 @@ app.post("/lancamento", async (req, res) => {
     const ref = db.collection("users").doc(uid).collection("transactions");
     const grupoParcelas = nParcelas > 1 ? `PARC-${Date.now()}` : "";
 
+    // ------------------------------
     // À vista
+    // ------------------------------
     if (nParcelas === 1) {
       const docData = {
         tipo: tipoLimpo,
@@ -581,9 +583,11 @@ app.post("/lancamento", async (req, res) => {
         docId: docRef.id,
         dados: docData,
       });
-    
+    }
 
+    // ------------------------------
     // Parcelado (crédito)
+    // ------------------------------
     const valorParcela = totalValor / nParcelas;
     const batch = db.batch();
     const idsParcelas = [];
@@ -627,108 +631,6 @@ app.post("/lancamento", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Erro em POST /lancamento:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-
-    }
-
-    // ------------------------------
-    // Parcelado (nParcelas > 1)
-    // ------------------------------
-    const valorParcela = totalValor / nParcelas;
-    const batch = db.batch();
-    const idsParcelas = [];
-
-    // dataIso está "YYYY-MM-DD"
-    const [anoBase, mesBase, diaBase] = dataIso.split("-").map(Number);
-    const dataBase = new Date(anoBase, mesBase - 1, diaBase);
-
-    for (let i = 0; i < nParcelas; i++) {
-      const d = new Date(dataBase);
-      d.setMonth(dataBase.getMonth() + i);
-
-      const dataParcela = d.toISOString().split("T")[0];
-
-      const docRef = ref.doc();
-      const docData = {
-        cartao: cartao || null,
-        categoriaId,
-        subcategoriaId: subcategoriaId || null,
-        data: dataParcela,
-        descricao: `${descricao} (parc. ${i + 1}/${nParcelas})`,
-        grupoParcelas,
-        meio: meioLimpo,
-        numeroParcela: i + 1,
-        parcelado: "sim",
-        parcelas: nParcelas,
-        tipo,
-        valor: valorParcela,
-      };
-
-      batch.set(docRef, docData);
-      idsParcelas.push({ id: docRef.id, data: docData });
-    }
-
-    await batch.commit();
-
-    console.log("✅ [LANÇAMENTO] Parcelas criadas:", idsParcelas);
-
-    return res.json({
-      status: "sucesso",
-      tipoLancamento: "parcelado",
-      parcelasCriadas: nParcelas,
-      documentos: idsParcelas.map((p) => ({
-        id: p.id,
-        data: p.data,
-      })),
-    });
-  } catch (err) {
-    console.error("❌ Erro em POST /lancamento:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// -------------------------------------------------------------
-// 📞 BUSCAR USUÁRIO PELO TELEFONE
-// -------------------------------------------------------------
-app.get("/usuario-por-telefone", async (req, res) => {
-  try {
-    const { telefone } = req.query;
-
-    if (!telefone) {
-      return res.status(400).json({
-        error: "Informe o telefone na query (?telefone=...)",
-      });
-    }
-
-    const telNormalizado = normalizarTelefone(telefone);
-
-    const snap = await db
-      .collection("users")
-      .where("telefone", "==", telNormalizado)
-      .limit(1)
-      .get();
-
-    if (snap.empty) {
-      return res.status(404).json({
-        error: "Nenhum usuário encontrado com esse telefone",
-      });
-    }
-
-    const docSnap = snap.docs[0];
-    const dados = docSnap.data();
-
-    return res.json({
-      uid: docSnap.id,
-      nome: dados.nome || null,
-      email: dados.email || null,
-      telefone: dados.telefone || telNormalizado,
-      cpf: dados.cpf || null,
-    });
-  } catch (err) {
-    console.error("Erro ao buscar usuário por telefone:", err);
     return res.status(500).json({ error: err.message });
   }
 });
