@@ -1106,6 +1106,154 @@ app.post("/relatorio/pdf", async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// 🔎 MATCH "SEMÂNTICO" (FUZZY) DE CARTÃO (por e-mail)
+// -------------------------------------------------------------
+
+function removerAcentos(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizarNome(s) {
+  return removerAcentos(String(s || ""))
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ") // tira pontuação
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Levenshtein distance
+function levenshtein(a, b) {
+  a = a || "";
+  b = b || "";
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+function similarityRatio(a, b) {
+  const A = normalizarNome(a);
+  const B = normalizarNome(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+
+  const dist = levenshtein(A, B);
+  const maxLen = Math.max(A.length, B.length);
+  return maxLen === 0 ? 0 : 1 - dist / maxLen; // 0..1
+}
+
+function tokenOverlapScore(a, b) {
+  const A = normalizarNome(a).split(" ").filter(Boolean);
+  const B = normalizarNome(b).split(" ").filter(Boolean);
+  if (!A.length || !B.length) return 0;
+
+  const setA = new Set(A);
+  const setB = new Set(B);
+
+  let inter = 0;
+  for (const t of setA) if (setB.has(t)) inter++;
+
+  const union = new Set([...setA, ...setB]).size;
+  return union === 0 ? 0 : inter / union; // 0..1
+}
+
+function scoreCartao(input, candidato) {
+  // mistura: token overlap ajuda quando o usuário escreve só parte do nome
+  // levenshtein ajuda quando ele erra letras
+  const s1 = tokenOverlapScore(input, candidato);
+  const s2 = similarityRatio(input, candidato);
+  return 0.55 * s1 + 0.45 * s2; // 0..1
+}
+
+app.post("/cartoes/match", async (req, res) => {
+  try {
+    const { email, cartao_input, limite_sugestoes = 5 } = req.body || {};
+
+    if (!email || !cartao_input) {
+      return res.status(400).json({
+        error: "Informe 'email' e 'cartao_input' no body.",
+      });
+    }
+
+    const uid = await getUserId(email.toString().trim().toLowerCase());
+
+    const snap = await db
+      .collection("users")
+      .doc(uid)
+      .collection("accounts")
+      .where("tipo", "==", "cartao")
+      .get();
+
+    const cartoes = [];
+    snap.forEach((docSnap) => {
+      const d = docSnap.data() || {};
+      if (d.nome) cartoes.push(d.nome);
+    });
+
+    if (!cartoes.length) {
+      return res.status(404).json({
+        status: "falha",
+        motivo: "nenhum_cartao_cadastrado",
+        mensagem: "Você não tem cartões cadastrados ainda.",
+      });
+    }
+
+    // calcula scores
+    const ranked = cartoes
+      .map((nome) => ({
+        nome,
+        score: scoreCartao(cartao_input, nome),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const melhor = ranked[0];
+    const sugestoes = ranked.slice(0, Number(limite_sugestoes) || 5);
+
+    // limiar (ajuste fino):
+    // 0.72 costuma pegar "parte do nome" e pequenos erros, sem dar match errado fácil
+    const LIMIAR = 0.72;
+
+    if (!melhor || melhor.score < LIMIAR) {
+      return res.status(404).json({
+        status: "falha",
+        motivo: "cartao_nao_encontrado",
+        cartao_input,
+        mensagem:
+          "Este cartão não está cadastrado (ou o nome não bateu). Tente escrever o nome mais próximo do cadastrado.",
+        sugestoes: sugestoes.map((s) => ({ nome: s.nome, score: Number(s.score.toFixed(3)) })),
+      });
+    }
+
+    return res.json({
+      status: "sucesso",
+      cartao_input,
+      cartao_correspondente: melhor.nome, // ✅ nome correto para você usar no /lancamento
+      score: Number(melhor.score.toFixed(3)),
+      sugestoes: sugestoes.map((s) => ({ nome: s.nome, score: Number(s.score.toFixed(3)) })),
+    });
+  } catch (err) {
+    console.error("Erro em /cartoes/match:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 
 
