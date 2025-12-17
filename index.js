@@ -499,8 +499,6 @@ app.post("/lancamento", async (req, res) => {
     const dataIso = normalizarData(data);
     if (!dataIso) return res.status(400).json({ error: "Data inválida" });
 
-    const uid = await getUserId(emailLimpo);
-
     // ✅ Verifica cadastro no Firebase
     let cartaoFinal = null;
     let contaFinal = null;
