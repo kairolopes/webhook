@@ -14,6 +14,32 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 // -------------------------------------------------------------
+// 🔁 WEBHOOK (Make) - dispara eventos quando algo acontece na API
+// -------------------------------------------------------------
+const MAKE_WEBHOOK_URL = process.env.MAKE_WEBHOOK_URL || ""; 
+// Exemplo: https://hook.us1.make.com/xxxxxx (coloque no Render/Railway como env var)
+
+async function enviarParaMake(evento, payload) {
+  if (!MAKE_WEBHOOK_URL) return; // se não configurar, não faz nada
+
+  try {
+    // Node 18+ tem fetch nativo. Se der erro, eu te falo como instalar node-fetch.
+    await fetch(MAKE_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        evento,
+        timestamp: new Date().toISOString(),
+        payload,
+      }),
+    });
+  } catch (e) {
+    console.warn("⚠️ Falhou webhook Make:", e.message);
+  }
+}
+
+
+// -------------------------------------------------------------
 // 🔥 Firebase
 // -------------------------------------------------------------
 admin.initializeApp();
@@ -318,6 +344,17 @@ app.post("/cadastro", async (req, res) => {
       criadoEm: new Date(),
     });
 
+
+    await enviarParaMake("usuario_cadastrado", {
+      uid: user.uid,
+      email: clean,
+      nome,
+      telefone: telNormalizado,
+    });
+
+
+
+    
     res.json({ status: "sucesso", uid: user.uid });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -364,6 +401,15 @@ app.post("/conta", async (req, res) => {
       .collection("wallets")
       .add(data);
 
+
+
+    await enviarParaMake("conta_criada", {
+      uid,
+      email,
+      conta: data,
+    });
+
+    
     res.json({ status: "sucesso" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -563,6 +609,16 @@ app.post("/lancamento", async (req, res) => {
 
       const docRef = await ref.add(docData);
 
+      await enviarParaMake("lancamento_criado", {
+        uid,
+        email: emailLimpo,
+        docId: docRef.id,
+        tipoLancamento: "avista",
+        dados: docData,
+      });
+
+
+      
       return res.json({
         status: "sucesso",
         tipoLancamento: "avista",
@@ -609,6 +665,28 @@ app.post("/lancamento", async (req, res) => {
 
     await batch.commit();
 
+
+    await enviarParaMake("lancamento_criado", {
+  uid,
+  email: emailLimpo,
+  tipoLancamento: "parcelado",
+  parcelasCriadas: nParcelas,
+  grupoParcelas,
+  // para não mandar gigante pro Make, manda só um resumo:
+  resumo: {
+    descricao,
+    total: totalValor,
+    valorParcela: Number((totalValor / nParcelas).toFixed(2)),
+    dataBase: dataIso,
+    meio: meioLimpo,
+    cartao: cartaoFinal,
+    categoriaId,
+    subcategoriaId: subcategoriaId || null,
+  },
+});
+
+
+    
     return res.json({
       status: "sucesso",
       tipoLancamento: "parcelado",
